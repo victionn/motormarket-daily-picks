@@ -21,6 +21,11 @@ on:
         required: false
         default: ""
 
+# Never run two at once: a second run waits for the first, so the no-repeat history is always up to date.
+concurrency:
+  group: daily-picks
+  cancel-in-progress: false
+
 jobs:
   picks:
     runs-on: ubuntu-latest
