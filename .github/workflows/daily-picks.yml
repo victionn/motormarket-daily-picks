@@ -71,5 +71,6 @@ jobs:
           TEST_EMAILS: ${{ vars.TEST_EMAILS }}
           TEST_AS: ${{ github.event.inputs.test_as }}
           COUNTDOWN_URL: ${{ vars.COUNTDOWN_URL }}
+          ENDING_COUNTDOWN_URL: ${{ vars.ENDING_COUNTDOWN_URL }}
           MIN_BUYERS: "20"
         run: python daily_picks.py
