@@ -1,7 +1,7 @@
-/* MotorMarket – vehicles ending today (Sydney date), top 10, with up to 3 selling points each.
+/* MotorMarket – vehicles on the NEXT closing day (Sydney date), top 10, with up to 3 selling points each.
    Ranked by distinct bidders + watchers. Same list for every buyer.
-   All auctions close at 12pm Sydney, so after 12pm this returns nothing
-   (change "+ INTERVAL 0 DAY" to "+ INTERVAL 1 DAY" to see tomorrow's close).
+   All auctions close at 12pm Sydney; the email goes at 1pm, so this is normally tomorrow's close
+   (or the next day that has closings, e.g. Monday over a weekend).
    Selling points, in priority order (top 3 kept):
      1. Electric / Hybrid / Plug-in hybrid
      2. Low km  ("Only 8,900 km" under 20k or under 5k km/yr; "Low km for age" under 10k km/yr)
@@ -31,9 +31,14 @@ ending AS (
     LEFT JOIN redbook_nvic_data rn ON rn.nvic = vi.nvic
     WHERE ag.deleted_at IS NULL AND ag.status = 'publish'
       AND ag.ends_at > UTC_TIMESTAMP()
-      AND DATE(CONVERT_TZ(ag.ends_at, '+00:00', 'Australia/Sydney'))
-        = DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', 'Australia/Sydney')) + INTERVAL 0 DAY
       AND TIMESTAMPDIFF(MINUTE, ag.starts_at, ag.ends_at) >= 60   -- skip ghost listings
+      /* the next day that has auctions closing (tomorrow when the email goes at 1pm) */
+      AND DATE(CONVERT_TZ(ag.ends_at, '+00:00', 'Australia/Sydney')) = (
+            SELECT MIN(DATE(CONVERT_TZ(ag2.ends_at, '+00:00', 'Australia/Sydney')))
+            FROM auction_groups ag2
+            WHERE ag2.deleted_at IS NULL AND ag2.status = 'publish'
+              AND ag2.ends_at > UTC_TIMESTAMP()
+              AND TIMESTAMPDIFF(MINUTE, ag2.starts_at, ag2.ends_at) >= 60)
 ),
 bidders AS (
     SELECT ab.auction_vehicle_id, COUNT(DISTINCT abh.bidder_id) AS bidders

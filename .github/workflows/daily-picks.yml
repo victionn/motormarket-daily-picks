@@ -1,12 +1,13 @@
 name: Daily picks
 
-# Runs at 6:15am Sydney every day. GitHub schedules are in UTC, so it is scheduled at both
-# 19:15 and 20:15 UTC (6:15am in daylight saving / standard time) and the run that doesn't
-# land on 6am Sydney stops straight away.
+# Runs at 12:15pm Sydney every day (auctions close at 12pm; the email goes at 1pm with the
+# next day's closings). GitHub schedules are in UTC, so it is scheduled at both 01:15 and
+# 02:15 UTC (12:15pm in daylight saving / standard time) and the run that doesn't land on
+# 12pm Sydney stops straight away.
 on:
   schedule:
-    - cron: "15 19 * * *"
-    - cron: "15 20 * * *"
+    - cron: "15 1 * * *"
+    - cron: "15 2 * * *"
   workflow_dispatch:
     inputs:
       mode:
@@ -21,11 +22,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - name: Only run at 6am Sydney
+      - name: Only run at 12pm Sydney
         id: gate
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Australia/Sydney date +%H)" != "06" ]; then
-            echo "Not 6am in Sydney - skipping this run"
+          # Sydney is UTC+11 in daylight saving (12:15pm = 01:15 UTC) and UTC+10 otherwise (02:15 UTC).
+          # Pick the schedule that matches today's offset; this still works if GitHub starts the run late.
+          if [ "$(TZ=Australia/Sydney date +%z)" = "+1100" ]; then want="15 1 * * *"; else want="15 2 * * *"; fi
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" != "$want" ]; then
+            echo "This schedule is for the other half of the year - skipping"
             echo "go=false" >> "$GITHUB_OUTPUT"
           else
             echo "go=true" >> "$GITHUB_OUTPUT"

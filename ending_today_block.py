@@ -1,4 +1,4 @@
-"""Builds the "Ending today at 12pm" HTML block for the MotorMarket Daily Picks email template
+"""Builds the "Ending <day> at 12pm" HTML block for the MotorMarket Daily Picks email template
 and puts it between the ENDING_TODAY_START / ENDING_TODAY_END markers.
 
 The daily script calls build_block() with the rows of the Metabase "ending today" question
@@ -8,9 +8,11 @@ The same list goes to every recipient, so no contact properties are needed.
 Run directly to rebuild the local template from a "~"/"^" string (testing only):
     python3 ending_today_block.py motormarket-daily-picks.html cars.txt
 """
+import datetime as dt
 import html
 import re
 import sys
+from zoneinfo import ZoneInfo
 
 START = "<!-- ENDING_TODAY_START -->"
 END = "<!-- ENDING_TODAY_END -->"
@@ -61,17 +63,31 @@ def _car(c):
           <tr><td bgcolor="#ffffff" style="padding:0 20px;"><div style="border-top:1px solid #CFE2F3; font-size:0; line-height:0;">&nbsp;</div></td></tr>'''
 
 
-def build_block(cars, max_cars=10):
+def _day_label(close_date, today=None):
+    """'today' / 'tomorrow' / weekday name for the closing date (Sydney)."""
+    today = today or dt.datetime.now(ZoneInfo("Australia/Sydney")).date()
+    if not close_date:
+        return "tomorrow"
+    days = (close_date - today).days
+    if days <= 0:
+        return "today"
+    if days == 1:
+        return "tomorrow"
+    return close_date.strftime("%A")
+
+
+def build_block(cars, max_cars=10, today=None):
     """cars: list of dicts in rank order. Returns the HTML between the markers ('' hides the section)."""
     cars = cars[:max_cars]
     if not cars:
         return ""
-    head = '''
+    day = _day_label(cars[0].get("close_date"), today)
+    head = f'''
           <tr>
-            <td bgcolor="#ffffff" style="padding:28px 20px 4px; font-family:Arial, sans-serif; font-size:18px; font-weight:bold; color:#23496d;">Ending today at 12pm</td>
+            <td bgcolor="#ffffff" style="padding:28px 20px 4px; font-family:Arial, sans-serif; font-size:18px; font-weight:bold; color:#23496d;">Ending {day} at 12pm</td>
           </tr>
           <tr>
-            <td bgcolor="#ffffff" style="padding:0 20px 8px; font-family:Arial, sans-serif; font-size:14px; color:#23496d; line-height:175%;">The most-watched cars closing today. Get your bids in before noon.</td>
+            <td bgcolor="#ffffff" style="padding:0 20px 8px; font-family:Arial, sans-serif; font-size:14px; color:#23496d; line-height:175%;">The most-watched cars closing {day}. Get your bids in before noon.</td>
           </tr>'''
     return head + "".join(_car(c) for c in cars) + "\n          "
 
@@ -81,6 +97,14 @@ def insert_block(template_src, block):
     if not pattern.search(template_src):
         raise ValueError("ENDING_TODAY markers not found in template")
     return pattern.sub(lambda m: START + block + END, template_src, count=1)
+
+
+def _parse_date(value):
+    """'2026-10-30T12:00:00...' (already Sydney time) -> date, or None."""
+    try:
+        return dt.date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
 
 
 def cars_from_metabase(rows):
@@ -96,6 +120,7 @@ def cars_from_metabase(rows):
             "odometer": r.get("odometer") or "",
             "state": r.get("state") or "",
             "tags": [r.get(f"point_{i}") for i in (1, 2, 3) if r.get(f"point_{i}")],
+            "close_date": _parse_date(r.get("ends_at_sydney")),
         })
     return cars
 
