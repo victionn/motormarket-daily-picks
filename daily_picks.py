@@ -24,7 +24,7 @@ import time
 
 import requests
 
-from ending_today_block import build_block, cars_from_metabase, countdown_url, insert_block, insert_close_date
+from ending_today_block import build_block, cars_from_metabase, insert_block, insert_close_date
 
 HUBSPOT = "https://api.hubapi.com"
 
@@ -158,11 +158,15 @@ def choose_picks(row, history):
     chosen = [n for n in ranked if car_id(row, n) not in seen][:3]
     chosen += [n for n in ranked if n not in chosen][:3 - len(chosen)]
     props = {}
+    timer_tpl = os.environ.get("COUNTDOWN_URL", "")
     for slot in (1, 2, 3):
         src = chosen[slot - 1] if slot <= len(chosen) else None
         for f in FIELDS:
             v = row.get(f"mp_rec_{src}_{f}") if src else None
             props[f"mp_rec_{slot}_{f}"] = "" if v is None else str(v)
+        # live countdown image to this car's own closing time
+        unix = row.get(f"mp_rec_{src}_close_unix") if src else None
+        props[f"mp_rec_{slot}_timer"] = timer_tpl.replace("{END_UNIX}", str(int(float(unix)))) if (timer_tpl and unix) else ""
     today = ",".join(i for i in (car_id(row, n) for n in chosen) if i)
     new_history = "|".join(([today] + sends)[:HISTORY_SENDS])
     return props, new_history
@@ -233,8 +237,7 @@ def main():
     if ending_id:
         ending = cars_from_metabase(run_question(ending_id))
         log(f"ending today: {len(ending)} cars")
-        timer = countdown_url(os.environ.get("COUNTDOWN_URL", ""), ending[0].get("close_at") if ending else None)
-        new_tpl = insert_block(get_template(tpl_path), build_block(ending, countdown=timer))
+        new_tpl = insert_block(get_template(tpl_path), build_block(ending))
         if ending:
             new_tpl = insert_close_date(new_tpl, ending[0].get("close_date"))
     else:
