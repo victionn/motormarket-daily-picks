@@ -22,7 +22,7 @@ UTM = "?utm_source=hubspot&utm_medium=email&utm_campaign=daily_picks&utm_content
 def _features(tags):
     """Green-tick feature lines, one per row."""
     return "".join(
-        f'<div style="line-height:22px; color:#217AFF; font-weight:600;">&#10003; {html.escape(t)}</div>'
+        f'<div style="line-height:22px; color:#217AFF; font-weight:400;">&#10003; {html.escape(t)}</div>'
         for t in tags[:3])
 
 
