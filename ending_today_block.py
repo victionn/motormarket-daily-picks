@@ -22,7 +22,7 @@ UTM = "?utm_source=hubspot&utm_medium=email&utm_campaign=daily_picks&utm_content
 def _features(tags):
     """Green-tick feature lines, one per row."""
     return "".join(
-        f'<div style="line-height:22px; color:#1a7f37; font-weight:bold;">&#10003; {html.escape(t)}</div>'
+        f'<div style="line-height:22px; color:#217AFF; font-weight:600;">&#10003; {html.escape(t)}</div>'
         for t in tags[:3])
 
 
@@ -34,8 +34,8 @@ def _car(c):
     if c.get("image"):
         img = (f'<td class="col-img" width="96" valign="top" style="width:96px; padding:0 10px;">'
                f'<table role="presentation" width="96" cellpadding="0" cellspacing="0" border="0"><tr>'
-               f'<td align="center" valign="middle" width="96" height="96" bgcolor="#EEF2F6" '
-               f'style="width:96px; height:96px; background:#EEF2F6; border-radius:6px; font-size:0; line-height:0;">'
+               f'<td align="center" valign="middle" width="96" height="96" bgcolor="#F7F7FA" '
+               f'style="width:96px; height:96px; background:#F7F7FA; border-radius:6px; font-size:0; line-height:0;">'
                f'<a href="{link}" target="_blank"><img src="{html.escape(c["image"])}" width="72" alt="{name}" '
                f'style="display:block; margin:0 auto; width:auto; height:auto; max-width:96px; max-height:96px; '
                f'border-radius:4px;"></a></td></tr></table></td>')
@@ -50,17 +50,17 @@ def _car(c):
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
                 <tr>
                   {img}
-                  <td valign="top" style="padding:2px 10px; font-family:Arial, sans-serif; font-size:14px; color:#23496d;">
-                    <a href="{link}" target="_blank" style="color:#383b3f; font-weight:bold; text-decoration:none; line-height:20px;">{name}</a>
-                    <div style="margin:4px 0 0; line-height:20px; color:#5b6b7b; font-size:13px;">{meta}</div>
+                  <td valign="top" style="padding:2px 10px; font-family:Poppins, Arial, sans-serif; font-size:14px; color:#001B49;">
+                    <a href="{link}" target="_blank" style="color:#001128; font-weight:600; text-decoration:none; line-height:20px;">{name}</a>
+                    <div style="margin:4px 0 0; line-height:20px; color:#001B49; font-size:13px;">{meta}</div>
                     {feat_div}
-                    <div style="margin:8px 0 0;"><a href="{link}" target="_blank" style="color:#0569ff; font-weight:bold; text-decoration:none; font-size:14px;">View &amp; bid &rarr;</a></div>
+                    <div style="margin:8px 0 0;"><a href="{link}" target="_blank" style="color:#217AFF; font-weight:600; text-decoration:none; font-size:14px;">View &amp; bid &rarr;</a></div>
                   </td>
                 </tr>
               </table>
             </td>
           </tr>
-          <tr><td bgcolor="#ffffff" style="padding:0 20px;"><div style="border-top:1px solid #CFE2F3; font-size:0; line-height:0;">&nbsp;</div></td></tr>'''
+          <tr><td bgcolor="#ffffff" style="padding:0 20px;"><div style="border-top:1px solid #EBF2FF; font-size:0; line-height:0;">&nbsp;</div></td></tr>'''
 
 
 def _day_label(close_date, today=None):
@@ -84,10 +84,10 @@ def build_block(cars, max_cars=10, today=None):
     day = _day_label(cars[0].get("close_date"), today)
     head = f'''
           <tr>
-            <td bgcolor="#ffffff" style="padding:28px 20px 4px; font-family:Arial, sans-serif; font-size:18px; font-weight:bold; color:#23496d;">Ending {day} at 12pm</td>
+            <td bgcolor="#ffffff" style="padding:28px 20px 4px; font-family:Poppins, Arial, sans-serif; font-size:18px; font-weight:600; color:#001B49;">Ending {day} at 12pm</td>
           </tr>
           <tr>
-            <td bgcolor="#ffffff" style="padding:0 20px 8px; font-family:Arial, sans-serif; font-size:14px; color:#23496d; line-height:175%;">The most-watched cars closing {day}. Get your bids in before noon.</td>
+            <td bgcolor="#ffffff" style="padding:0 20px 8px; font-family:Poppins, Arial, sans-serif; font-size:14px; color:#001B49; line-height:175%;">The most-watched cars closing {day}. Get your bids in before noon.</td>
           </tr>'''
     return head + "".join(_car(c) for c in cars) + "\n          "
 
@@ -123,6 +123,26 @@ def cars_from_metabase(rows):
             "close_date": _parse_date(r.get("ends_at_sydney")),
         })
     return cars
+
+
+DATE_START = "<!-- CLOSE_DATE_START -->"
+DATE_END = "<!-- CLOSE_DATE_END -->"
+
+
+def close_date_text(close_date):
+    """date -> 'Friday 30 October at 12pm AEDT' (AEST outside daylight saving)."""
+    tz = dt.datetime(close_date.year, close_date.month, close_date.day, 12,
+                     tzinfo=ZoneInfo("Australia/Sydney")).tzname()
+    return f"{close_date.strftime('%A')} {close_date.day} {close_date.strftime('%B')} at 12pm {tz}"
+
+
+def insert_close_date(template_src, close_date):
+    """Fill the banner's 'Bidding closes ...' date. Leaves the template alone if the markers are missing."""
+    if not close_date or DATE_START not in template_src:
+        return template_src
+    pattern = re.compile(re.escape(DATE_START) + r".*?" + re.escape(DATE_END), re.S)
+    return pattern.sub(lambda m: DATE_START + html.escape(close_date_text(close_date)) + DATE_END,
+                       template_src, count=1)
 
 
 def parse_delimited(raw):

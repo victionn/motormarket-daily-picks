@@ -18,20 +18,64 @@ Env vars: METABASE_URL, METABASE_API_KEY, PICKS_QUESTION_ID (270), ENDING_QUESTI
 """
 import json
 import os
+import re
 import sys
 import time
 
 import requests
 
-from ending_today_block import build_block, cars_from_metabase, insert_block
+from ending_today_block import build_block, cars_from_metabase, insert_block, insert_close_date
 
 HUBSPOT = "https://api.hubapi.com"
 
-# Columns of question 270 that are written to HubSpot (the review columns are NOT).
-PROPS = ["mp_rec_generated_at"] + [
-    f"mp_rec_{n}_{f}" for n in (1, 2, 3)
-    for f in ("vehicle", "link", "image", "odometer", "state", "feature_1", "feature_2", "feature_3")
-]
+# Per-pick fields. Question 270 returns each buyer's top 9 (mp_rec_1..9_*); the script writes the
+# best 3 the buyer hasn't been shown recently into HubSpot slots mp_rec_1..3_* (review columns never).
+FIELDS = ("vehicle", "link", "image", "odometer", "state", "feature_1", "feature_2", "feature_3")
+CANDIDATES = 9
+HISTORY_SENDS = 3          # don't repeat a car shown in the buyer's last 3 emails
+HISTORY_PROP = "mp_rec_history"
+LINK_ID = re.compile(r"/buying/([0-9a-f-]{36})/", re.I)
+
+# Brands that stay in capitals; everything else becomes Title Case ("VOLVO" -> "Volvo").
+UPPER_WORDS = {"BMW", "MG", "BYD", "GWM", "LDV", "RAM", "GMC", "HSV", "FPV", "AMG", "GT", "GTI",
+               "SUV", "EV", "HR-V", "CR-V", "ZR-V", "CX-3", "CX-30", "CX-5", "CX-60", "CX-8", "CX-9",
+               "MX-5", "BT-50", "D-MAX", "MU-X", "C-HR", "ASX", "RAV4", "IX35", "UX", "NX", "RX", "ES",
+               "IS", "GS", "LX", "GX", "XV", "WRX", "BRZ", "XC40", "XC60", "XC90", "Q2", "Q3", "Q5", "Q7",
+               "Q8", "A1", "A3", "A4", "A5", "A6", "TT", "CLA", "CLE", "CLS", "GLA", "GLB", "GLC", "GLE",
+               "GLS", "SLK", "SL", "EQA", "EQB", "EQC", "EQE", "EQS", "XF", "XE", "XJ", "RS", "RCZ"}
+SPECIAL = {"MERCEDES-BENZ": "Mercedes-Benz", "MERCEDES-AMG": "Mercedes-AMG", "LAND": "Land",
+           "ROVER": "Rover", "ALFA": "Alfa", "ROMEO": "Romeo", "IONIQ": "IONIQ"}
+
+
+def nice_name(vehicle):
+    """'2023 VOLVO XC60' -> 'Volvo XC60'; '2024 TOYOTA COROLLA CROSS' -> 'Toyota Corolla Cross'."""
+    words = (vehicle or "").split()
+    if words and words[0].isdigit():
+        words = words[1:]
+    out = []
+    for w in words:
+        u = w.upper()
+        if u in SPECIAL:
+            out.append(SPECIAL[u])
+        elif len(u) > 1 and u[0] == "I" and u[1:].isdigit():
+            out.append("i" + u[1:])  # Hyundai i30, BMW i4
+        elif u in UPPER_WORDS or any(ch.isdigit() for ch in u) or len(u) <= 2:
+            out.append(u)  # model codes like X5, XC60 stay as they are
+        else:
+            out.append("-".join(part.capitalize() for part in u.split("-")))  # T-CROSS -> T-Cross
+    return " ".join(out)
+
+
+def subject_line(row):
+    """Personalised subject from the buyer's picks, e.g.
+    'Volvo XC60, Nissan Navara & more picked for you – bidding closes soon'"""
+    names = [nice_name(row.get(f"mp_rec_{n}_vehicle")) for n in (1, 2, 3)]
+    names = [n for n in names if n]
+    if not names:
+        return "Cars picked for you on MotorMarket – bidding closes soon"
+    if len(names) == 1:
+        return f"{names[0]} picked for you – bidding closes soon"
+    return f"{names[0]}, {names[1]} & more picked for you – bidding closes soon"
 
 
 def env(name, default=None, required=True):
@@ -77,15 +121,51 @@ def chunks(xs, n=100):
         yield xs[i:i + n]
 
 
-def contact_ids_by_email(emails):
-    ids = {}
+def contacts_by_email(emails):
+    """email -> (contact id, history string) for contacts that already exist in HubSpot."""
+    found = {}
     for batch in chunks(emails):
         r = hs("POST", "/crm/v3/objects/contacts/batch/read",
-               json={"idProperty": "email", "properties": ["email"],
+               json={"idProperty": "email", "properties": ["email", HISTORY_PROP],
                      "inputs": [{"id": e} for e in batch]})
         for c in r.json().get("results", []):
-            ids[(c["properties"].get("email") or "").lower()] = c["id"]
-    return ids
+            props = c["properties"]
+            found[(props.get("email") or "").lower()] = (c["id"], props.get(HISTORY_PROP) or "")
+    return found
+
+
+def car_id(row, n):
+    m = LINK_ID.search(row.get(f"mp_rec_{n}_link") or "")
+    return m.group(1).lower() if m else None
+
+
+def choose_picks(row, history):
+    """The buyer's best 3 of their top 6, skipping cars shown in their last HISTORY_SENDS emails.
+    history: 'id,id,id|id,id,id|...' newest send first. Falls back to seen cars if needed so
+    there are always 3. Returns (props for slots 1..3, new history string)."""
+    sends = [s for s in history.split("|") if s][:HISTORY_SENDS]
+    seen = {i for s in sends for i in s.split(",") if i}
+    ranked = [n for n in range(1, CANDIDATES + 1) if row.get(f"mp_rec_{n}_vehicle")]
+    # drop any repeat of the same car within the ranking (safety net; the query already dedupes)
+    unique, ids = [], set()
+    for n in ranked:
+        cid = car_id(row, n)
+        if cid in ids:
+            continue
+        ids.add(cid)
+        unique.append(n)
+    ranked = unique
+    chosen = [n for n in ranked if car_id(row, n) not in seen][:3]
+    chosen += [n for n in ranked if n not in chosen][:3 - len(chosen)]
+    props = {}
+    for slot in (1, 2, 3):
+        src = chosen[slot - 1] if slot <= len(chosen) else None
+        for f in FIELDS:
+            v = row.get(f"mp_rec_{src}_{f}") if src else None
+            props[f"mp_rec_{slot}_{f}"] = "" if v is None else str(v)
+    today = ",".join(i for i in (car_id(row, n) for n in chosen) if i)
+    new_history = "|".join(([today] + sends)[:HISTORY_SENDS])
+    return props, new_history
 
 
 def update_contacts(updates):
@@ -127,10 +207,21 @@ def main():
             f"to {', '.join(sorted(test_emails))}")
         by_email = {e: sample for e in test_emails} if sample else {}
 
-    ids = contact_ids_by_email(list(by_email))
-    missing = [e for e in by_email if e not in ids]
-    updates = [{"id": ids[e], "properties": {p: ("" if r.get(p) is None else str(r.get(p))) for p in PROPS}}
-               for e, r in by_email.items() if e in ids]
+    contacts = contacts_by_email(list(by_email))
+    missing = [e for e in by_email if e not in contacts]
+    updates, repeats_avoided = [], 0
+    for e, r in by_email.items():
+        if e not in contacts:
+            continue
+        cid, history = contacts[e]
+        props, new_history = choose_picks(r, history)
+        repeats_avoided += sum(1 for n in (1, 2, 3)
+                               if props[f"mp_rec_{n}_link"] != (r.get(f"mp_rec_{n}_link") or ""))
+        props.update({"mp_rec_generated_at": str(r.get("mp_rec_generated_at") or ""),
+                      "mp_rec_subject": subject_line(props),
+                      HISTORY_PROP: new_history})
+        updates.append({"id": cid, "properties": props})
+    log(f"picks swapped to avoid repeats: {repeats_avoided}")
     log(f"contacts to update: {len(updates)}; not in HubSpot: {len(missing)}")
     if missing:
         log("not in HubSpot (skipped): " + ", ".join(sorted(missing)[:20]) + (" …" if len(missing) > 20 else ""))
@@ -143,6 +234,8 @@ def main():
         ending = cars_from_metabase(run_question(ending_id))
         log(f"ending today: {len(ending)} cars")
         new_tpl = insert_block(get_template(tpl_path), build_block(ending))
+        if ending:
+            new_tpl = insert_close_date(new_tpl, ending[0].get("close_date"))
     else:
         log("ENDING_QUESTION_ID not set: template left as is")
 

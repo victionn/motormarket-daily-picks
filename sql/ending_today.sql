@@ -1,7 +1,7 @@
 /* MotorMarket – vehicles on the NEXT closing day (Sydney date), top 10, with up to 3 selling points each.
    Ranked by distinct bidders + watchers. Same list for every buyer.
-   All auctions close at 12pm Sydney; the email goes at 1pm, so this is normally tomorrow's close
-   (or the next day that has closings, e.g. Monday over a weekend).
+   All auctions close at 12pm Sydney; cars closing at today's 12pm are excluded (the email goes at 12:05),
+   so this is the next closing day: tomorrow, or Monday over a weekend.
    Selling points, in priority order (top 3 kept):
      1. Electric / Hybrid / Plug-in hybrid
      2. Low km  ("Only 8,900 km" under 20k or under 5k km/yr; "Low km for age" under 10k km/yr)
@@ -30,14 +30,14 @@ ending AS (
     JOIN vehicle_info vi      ON vi.id = vc.vehicle_id
     LEFT JOIN redbook_nvic_data rn ON rn.nvic = vi.nvic
     WHERE ag.deleted_at IS NULL AND ag.status = 'publish'
-      AND ag.ends_at > UTC_TIMESTAMP()
+      AND ag.ends_at > GREATEST(UTC_TIMESTAMP(), CONVERT_TZ(CONCAT(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', 'Australia/Sydney')), ' 12:00:00'), 'Australia/Sydney', '+00:00'))
       AND TIMESTAMPDIFF(MINUTE, ag.starts_at, ag.ends_at) >= 60   -- skip ghost listings
       /* the next day that has auctions closing (tomorrow when the email goes at 1pm) */
       AND DATE(CONVERT_TZ(ag.ends_at, '+00:00', 'Australia/Sydney')) = (
             SELECT MIN(DATE(CONVERT_TZ(ag2.ends_at, '+00:00', 'Australia/Sydney')))
             FROM auction_groups ag2
             WHERE ag2.deleted_at IS NULL AND ag2.status = 'publish'
-              AND ag2.ends_at > UTC_TIMESTAMP()
+              AND ag2.ends_at > GREATEST(UTC_TIMESTAMP(), CONVERT_TZ(CONCAT(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', 'Australia/Sydney')), ' 12:00:00'), 'Australia/Sydney', '+00:00'))
               AND TIMESTAMPDIFF(MINUTE, ag2.starts_at, ag2.ends_at) >= 60)
 ),
 bidders AS (
@@ -57,9 +57,10 @@ photo AS (
     SELECT vehicle_id, image_path FROM (
         SELECT vim.vehicle_id, vim.image_path,
                ROW_NUMBER() OVER (PARTITION BY vim.vehicle_id
-                                  ORDER BY (vim.`order` = 2) DESC, vim.`order`) AS rn
+                                  ORDER BY (vim.label LIKE 'additional%' OR vim.label IN ('photo-multiple', 'vin', 'build plate', 'odometer')),
+                                           vim.`order`, vim.created_at) AS rn
         FROM vehicle_images vim
-        WHERE vim.category = 'masthead'
+        WHERE vim.category IN ('masthead', 'additional')
           AND vim.vehicle_id IN (SELECT vehicle_id FROM ending)
     ) x WHERE rn = 1
 ),

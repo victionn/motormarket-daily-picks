@@ -1,4 +1,5 @@
-/* Daily MotorMarket picks – EVERY active bidder (bid in the last 90 days) gets exactly 3 live cars.
+/* Daily MotorMarket picks – EVERY active bidder (bid in the last 90 days) gets their top 9 live cars, ranked.
+   The daily script emails the best 3 the buyer hasn't been shown in their last 3 emails (no repeats).
    Score per buyer x live car (0–1):
      40% price fit   – 1 at the buyer's average reserve, 0 at ±50%
      30% car type    – √(share of their bids on this type). Types: Luxury (BMW, Mercedes, Audi, Lexus,
@@ -114,7 +115,7 @@ active_bidders AS (
     HAVING MAX(ub.last_bid_at) >= UTC_TIMESTAMP() - INTERVAL 90 DAY
 ),
 live_vehicles AS (
-    /* Published stock closing in the next 48h; ghost listings < 60 min excluded */
+    /* Everything live on MotorMarket that is still open after today's 12pm close; ghost listings < 60 min excluded */
     SELECT av.id AS auction_vehicle_id, av.contract_id, vc.vehicle_id, ag.seller_id, ag.ends_at,
            UPPER(TRIM(ag.state)) AS state,
            vi.make, vi.model, vi.vtype, vi.year, vi.odometer, aa.amount AS reserve,
@@ -125,21 +126,25 @@ live_vehicles AS (
     JOIN vehicle_contracts vc ON vc.id = av.contract_id
     JOIN vehicle_info vi      ON vi.id = vc.vehicle_id
     LEFT JOIN redbook_nvic_data rb ON rb.nvic = vi.nvic
-    LEFT JOIN acquisition_amounts aa ON aa.contract_id = av.contract_id AND aa.amount_type = 'acquisition'
+    /* one reserve per car (a few cars have two reserve rows, which would duplicate the car) */
+    LEFT JOIN (SELECT contract_id, MAX(amount) AS amount FROM acquisition_amounts
+               WHERE amount_type = 'acquisition' GROUP BY contract_id) aa ON aa.contract_id = av.contract_id
     WHERE ag.deleted_at IS NULL AND ag.status = 'publish'
-      AND ag.ends_at >  UTC_TIMESTAMP()
-      AND ag.ends_at <= UTC_TIMESTAMP() + INTERVAL 2 DAY
+      /* still open after today's 12pm close (the script runs before noon, the email goes at 12:05) */
+      AND ag.ends_at > GREATEST(UTC_TIMESTAMP(), CONVERT_TZ(CONCAT(DATE(CONVERT_TZ(UTC_TIMESTAMP(), '+00:00', 'Australia/Sydney')), ' 12:00:00'), 'Australia/Sydney', '+00:00'))
       AND TIMESTAMPDIFF(MINUTE, ag.starts_at, ag.ends_at) >= 60
 ),
 live_photo AS (
-    /* One listing photo per live car: the 'front left corner' shot (order 2) if present,
-       otherwise the first masthead photo. Public S3 thumbnail URL. */
+    /* One listing photo per live car, the same one MotorMarket shows first: photos from both the
+       'masthead' and 'additional' categories in gallery order, skipping unlabelled uploads (can be
+       invoices), VIN, build-plate and odometer shots when a real car photo exists. Public S3 thumbnail URL. */
     SELECT vehicle_id, image_path FROM (
         SELECT vim.vehicle_id, vim.image_path,
                ROW_NUMBER() OVER (PARTITION BY vim.vehicle_id
-                                  ORDER BY (vim.`order` = 2) DESC, vim.`order`) AS rn
+                                  ORDER BY (vim.label LIKE 'additional%' OR vim.label IN ('photo-multiple', 'vin', 'build plate', 'odometer')),
+                                           vim.`order`, vim.created_at) AS rn
         FROM vehicle_images vim
-        WHERE vim.category = 'masthead'
+        WHERE vim.category IN ('masthead', 'additional')
           AND vim.vehicle_id IN (SELECT vehicle_id FROM live_vehicles)
     ) x WHERE rn = 1
 ),
@@ -313,7 +318,7 @@ picks AS (
     ) r
     LEFT JOIN live_photo lp     ON lp.vehicle_id = r.vehicle_id
     LEFT JOIN selling_points sp ON sp.contract_id = r.contract_id
-    WHERE r.rn <= 3
+    WHERE r.rn <= 9
 )
 SELECT
     ab.email                                                   AS `Email`,
@@ -341,6 +346,54 @@ SELECT
     MAX(CASE WHEN p.rn = 3 THEN p.f1 END)                      AS `mp_rec_3_feature_1`,
     MAX(CASE WHEN p.rn = 3 THEN p.f2 END)                      AS `mp_rec_3_feature_2`,
     MAX(CASE WHEN p.rn = 3 THEN p.f3 END)                      AS `mp_rec_3_feature_3`,
+    MAX(CASE WHEN p.rn = 4 THEN p.vehicle_name END)            AS `mp_rec_4_vehicle`,
+    MAX(CASE WHEN p.rn = 4 THEN p.link END)                    AS `mp_rec_4_link`,
+    MAX(CASE WHEN p.rn = 4 THEN p.image_url END)               AS `mp_rec_4_image`,
+    MAX(CASE WHEN p.rn = 4 THEN p.odometer_fmt END)            AS `mp_rec_4_odometer`,
+    MAX(CASE WHEN p.rn = 4 THEN p.state_fmt END)               AS `mp_rec_4_state`,
+    MAX(CASE WHEN p.rn = 4 THEN p.f1 END)                      AS `mp_rec_4_feature_1`,
+    MAX(CASE WHEN p.rn = 4 THEN p.f2 END)                      AS `mp_rec_4_feature_2`,
+    MAX(CASE WHEN p.rn = 4 THEN p.f3 END)                      AS `mp_rec_4_feature_3`,
+    MAX(CASE WHEN p.rn = 5 THEN p.vehicle_name END)            AS `mp_rec_5_vehicle`,
+    MAX(CASE WHEN p.rn = 5 THEN p.link END)                    AS `mp_rec_5_link`,
+    MAX(CASE WHEN p.rn = 5 THEN p.image_url END)               AS `mp_rec_5_image`,
+    MAX(CASE WHEN p.rn = 5 THEN p.odometer_fmt END)            AS `mp_rec_5_odometer`,
+    MAX(CASE WHEN p.rn = 5 THEN p.state_fmt END)               AS `mp_rec_5_state`,
+    MAX(CASE WHEN p.rn = 5 THEN p.f1 END)                      AS `mp_rec_5_feature_1`,
+    MAX(CASE WHEN p.rn = 5 THEN p.f2 END)                      AS `mp_rec_5_feature_2`,
+    MAX(CASE WHEN p.rn = 5 THEN p.f3 END)                      AS `mp_rec_5_feature_3`,
+    MAX(CASE WHEN p.rn = 6 THEN p.vehicle_name END)            AS `mp_rec_6_vehicle`,
+    MAX(CASE WHEN p.rn = 6 THEN p.link END)                    AS `mp_rec_6_link`,
+    MAX(CASE WHEN p.rn = 6 THEN p.image_url END)               AS `mp_rec_6_image`,
+    MAX(CASE WHEN p.rn = 6 THEN p.odometer_fmt END)            AS `mp_rec_6_odometer`,
+    MAX(CASE WHEN p.rn = 6 THEN p.state_fmt END)               AS `mp_rec_6_state`,
+    MAX(CASE WHEN p.rn = 6 THEN p.f1 END)                      AS `mp_rec_6_feature_1`,
+    MAX(CASE WHEN p.rn = 6 THEN p.f2 END)                      AS `mp_rec_6_feature_2`,
+    MAX(CASE WHEN p.rn = 6 THEN p.f3 END)                      AS `mp_rec_6_feature_3`,
+    MAX(CASE WHEN p.rn = 7 THEN p.vehicle_name END)            AS `mp_rec_7_vehicle`,
+    MAX(CASE WHEN p.rn = 7 THEN p.link END)                    AS `mp_rec_7_link`,
+    MAX(CASE WHEN p.rn = 7 THEN p.image_url END)               AS `mp_rec_7_image`,
+    MAX(CASE WHEN p.rn = 7 THEN p.odometer_fmt END)            AS `mp_rec_7_odometer`,
+    MAX(CASE WHEN p.rn = 7 THEN p.state_fmt END)               AS `mp_rec_7_state`,
+    MAX(CASE WHEN p.rn = 7 THEN p.f1 END)                      AS `mp_rec_7_feature_1`,
+    MAX(CASE WHEN p.rn = 7 THEN p.f2 END)                      AS `mp_rec_7_feature_2`,
+    MAX(CASE WHEN p.rn = 7 THEN p.f3 END)                      AS `mp_rec_7_feature_3`,
+    MAX(CASE WHEN p.rn = 8 THEN p.vehicle_name END)            AS `mp_rec_8_vehicle`,
+    MAX(CASE WHEN p.rn = 8 THEN p.link END)                    AS `mp_rec_8_link`,
+    MAX(CASE WHEN p.rn = 8 THEN p.image_url END)               AS `mp_rec_8_image`,
+    MAX(CASE WHEN p.rn = 8 THEN p.odometer_fmt END)            AS `mp_rec_8_odometer`,
+    MAX(CASE WHEN p.rn = 8 THEN p.state_fmt END)               AS `mp_rec_8_state`,
+    MAX(CASE WHEN p.rn = 8 THEN p.f1 END)                      AS `mp_rec_8_feature_1`,
+    MAX(CASE WHEN p.rn = 8 THEN p.f2 END)                      AS `mp_rec_8_feature_2`,
+    MAX(CASE WHEN p.rn = 8 THEN p.f3 END)                      AS `mp_rec_8_feature_3`,
+    MAX(CASE WHEN p.rn = 9 THEN p.vehicle_name END)            AS `mp_rec_9_vehicle`,
+    MAX(CASE WHEN p.rn = 9 THEN p.link END)                    AS `mp_rec_9_link`,
+    MAX(CASE WHEN p.rn = 9 THEN p.image_url END)               AS `mp_rec_9_image`,
+    MAX(CASE WHEN p.rn = 9 THEN p.odometer_fmt END)            AS `mp_rec_9_odometer`,
+    MAX(CASE WHEN p.rn = 9 THEN p.state_fmt END)               AS `mp_rec_9_state`,
+    MAX(CASE WHEN p.rn = 9 THEN p.f1 END)                      AS `mp_rec_9_feature_1`,
+    MAX(CASE WHEN p.rn = 9 THEN p.f2 END)                      AS `mp_rec_9_feature_2`,
+    MAX(CASE WHEN p.rn = 9 THEN p.f3 END)                      AS `mp_rec_9_feature_3`,
     DATE_FORMAT(UTC_TIMESTAMP(), '%Y-%m-%dT%H:%i:%sZ')         AS `mp_rec_generated_at`,
     /* Review columns – don't import */
     ROUND(MAX(CASE WHEN p.rn = 1 THEN p.score END), 3)         AS `top_score`,

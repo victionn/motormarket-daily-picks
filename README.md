@@ -1,10 +1,10 @@
 # MotorMarket Daily Picks
 
-Every day at 12:15pm Sydney (just after auctions close) this job:
+At 10:45am Sydney on Tuesday, Thursday and Sunday this job:
 1. runs Metabase question 270 and writes each buyer's 3 picks onto their HubSpot contact (existing contacts only);
 2. runs the "ending" question and rebuilds the "Ending tomorrow at 12pm" block in the email template.
 
-The HubSpot workflow then sends the email at 1pm to contacts whose `mp_rec_generated_at` changed.
+The HubSpot workflow then sends the email at 12:05pm to contacts whose `mp_rec_generated_at` changed.
 
 ## Settings (GitHub → Settings → Secrets and variables → Actions)
 Secrets:
