@@ -1,0 +1,121 @@
+"""Builds the "Ending today at 12pm" HTML block for the MotorMarket Daily Picks email template
+and puts it between the ENDING_TODAY_START / ENDING_TODAY_END markers.
+
+The daily script calls build_block() with the rows of the Metabase "ending today" question
+(rank, vehicle, state, odometer, point_1..3, link, image) and then uploads the template.
+The same list goes to every recipient, so no contact properties are needed.
+
+Run directly to rebuild the local template from a "~"/"^" string (testing only):
+    python3 ending_today_block.py motormarket-daily-picks.html cars.txt
+"""
+import html
+import re
+import sys
+
+START = "<!-- ENDING_TODAY_START -->"
+END = "<!-- ENDING_TODAY_END -->"
+UTM = "?utm_source=hubspot&utm_medium=email&utm_campaign=daily_picks&utm_content=ending_today"
+
+
+def _features(tags):
+    """Green-tick feature lines, one per row."""
+    return "".join(
+        f'<div style="line-height:22px; color:#1a7f37; font-weight:bold;">&#10003; {html.escape(t)}</div>'
+        for t in tags[:3])
+
+
+def _car(c):
+    """c: dict with contract_id, name, image, odometer, state, tags (list)."""
+    link = html.escape(f"https://app.motorplatform.com.au/motor-market/buying/{c['contract_id']}/summary{UTM}")
+    name = html.escape(c["name"])
+    img = ""
+    if c.get("image"):
+        img = (f'<td class="col-img" width="96" valign="top" style="width:96px; padding:0 10px;">'
+               f'<table role="presentation" width="96" cellpadding="0" cellspacing="0" border="0"><tr>'
+               f'<td align="center" valign="middle" width="96" height="96" bgcolor="#EEF2F6" '
+               f'style="width:96px; height:96px; background:#EEF2F6; border-radius:6px; font-size:0; line-height:0;">'
+               f'<a href="{link}" target="_blank"><img src="{html.escape(c["image"])}" width="72" alt="{name}" '
+               f'style="display:block; margin:0 auto; width:auto; height:auto; max-width:96px; max-height:96px; '
+               f'border-radius:4px;"></a></td></tr></table></td>')
+    meta = " &nbsp;&nbsp; ".join(x for x in (
+        f"&#9201;&nbsp;{html.escape(c['odometer'])} KM" if c.get("odometer") else "",
+        f"&#8982;&nbsp;{html.escape(c['state'])}" if c.get("state") else "") if x)
+    feats = _features(c.get("tags") or [])
+    feat_div = f'<div style="margin:6px 0 0; font-size:13px;">{feats}</div>' if feats else ""
+    return f'''
+          <tr>
+            <td bgcolor="#ffffff" style="padding:8px 10px;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                <tr>
+                  {img}
+                  <td valign="top" style="padding:2px 10px; font-family:Arial, sans-serif; font-size:14px; color:#23496d;">
+                    <a href="{link}" target="_blank" style="color:#383b3f; font-weight:bold; text-decoration:none; line-height:20px;">{name}</a>
+                    <div style="margin:4px 0 0; line-height:20px; color:#5b6b7b; font-size:13px;">{meta}</div>
+                    {feat_div}
+                    <div style="margin:8px 0 0;"><a href="{link}" target="_blank" style="color:#0569ff; font-weight:bold; text-decoration:none; font-size:14px;">View &amp; bid &rarr;</a></div>
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+          <tr><td bgcolor="#ffffff" style="padding:0 20px;"><div style="border-top:1px solid #CFE2F3; font-size:0; line-height:0;">&nbsp;</div></td></tr>'''
+
+
+def build_block(cars, max_cars=10):
+    """cars: list of dicts in rank order. Returns the HTML between the markers ('' hides the section)."""
+    cars = cars[:max_cars]
+    if not cars:
+        return ""
+    head = '''
+          <tr>
+            <td bgcolor="#ffffff" style="padding:28px 20px 4px; font-family:Arial, sans-serif; font-size:18px; font-weight:bold; color:#23496d;">Ending today at 12pm</td>
+          </tr>
+          <tr>
+            <td bgcolor="#ffffff" style="padding:0 20px 8px; font-family:Arial, sans-serif; font-size:14px; color:#23496d; line-height:175%;">The most-watched cars closing today. Get your bids in before noon.</td>
+          </tr>'''
+    return head + "".join(_car(c) for c in cars) + "\n          "
+
+
+def insert_block(template_src, block):
+    pattern = re.compile(re.escape(START) + r".*?" + re.escape(END), re.S)
+    if not pattern.search(template_src):
+        raise ValueError("ENDING_TODAY markers not found in template")
+    return pattern.sub(lambda m: START + block + END, template_src, count=1)
+
+
+def cars_from_metabase(rows):
+    """Rows of the Metabase "ending today" question (JSON export) -> car dicts, in rank order."""
+    cars = []
+    for r in rows:
+        if not r.get("contract_id"):
+            continue
+        cars.append({
+            "contract_id": r["contract_id"],
+            "name": r.get("vehicle") or "",
+            "image": r.get("image") or "",
+            "odometer": r.get("odometer") or "",
+            "state": r.get("state") or "",
+            "tags": [r.get(f"point_{i}") for i in (1, 2, 3) if r.get(f"point_{i}")],
+        })
+    return cars
+
+
+def parse_delimited(raw):
+    """'id^name^image^odo^state^tag|tag~...' ('-' = empty) -> list of car dicts."""
+    cars = []
+    for row in raw.strip().split("~"):
+        f = row.split("^")
+        if len(f) < 6:
+            continue
+        clean = lambda v: "" if v == "-" else v
+        cars.append({"contract_id": f[0], "name": f[1], "image": clean(f[2]), "odometer": clean(f[3]),
+                     "state": clean(f[4]), "tags": [t for t in clean(f[5]).split("|") if t]})
+    return cars
+
+
+if __name__ == "__main__":
+    tpl_path, data_path = sys.argv[1], sys.argv[2]
+    src = open(tpl_path).read()
+    cars = parse_delimited(open(data_path).read())
+    open(tpl_path, "w").write(insert_block(src, build_block(cars)))
+    print(f"inserted {len(cars[:10])} cars")

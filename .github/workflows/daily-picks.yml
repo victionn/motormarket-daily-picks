@@ -1,0 +1,60 @@
+name: Daily picks
+
+# Runs at 6:15am Sydney every day. GitHub schedules are in UTC, so it is scheduled at both
+# 19:15 and 20:15 UTC (6:15am in daylight saving / standard time) and the run that doesn't
+# land on 6am Sydney stops straight away.
+on:
+  schedule:
+    - cron: "15 19 * * *"
+    - cron: "15 20 * * *"
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "dry-run (write nothing), test (TEST_EMAILS only) or live (everyone)"
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, test, live]
+
+jobs:
+  picks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Only run at 6am Sydney
+        id: gate
+        run: |
+          if [ "${{ github.event_name }}" = "schedule" ] && [ "$(TZ=Australia/Sydney date +%H)" != "06" ]; then
+            echo "Not 6am in Sydney - skipping this run"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "go=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        if: steps.gate.outputs.go == 'true'
+
+      - uses: actions/setup-python@v5
+        if: steps.gate.outputs.go == 'true'
+        with:
+          python-version: "3.12"
+
+      - name: Install
+        if: steps.gate.outputs.go == 'true'
+        run: pip install -r requirements.txt
+
+      - name: Update HubSpot
+        if: steps.gate.outputs.go == 'true'
+        env:
+          # Manual runs use the mode picked in the Run workflow box; scheduled runs use the
+          # repo variable MODE (set it to test first, then live once signed off).
+          MODE: ${{ github.event.inputs.mode || vars.MODE || 'dry-run' }}
+          METABASE_URL: https://reporting.motorplatform.com.au
+          METABASE_API_KEY: ${{ secrets.METABASE_API_KEY }}
+          HUBSPOT_TOKEN: ${{ secrets.HUBSPOT_TOKEN }}
+          PICKS_QUESTION_ID: "270"
+          ENDING_QUESTION_ID: ${{ vars.ENDING_QUESTION_ID }}
+          TEMPLATE_PATH: ${{ vars.TEMPLATE_PATH || 'motormarket-daily-picks.html' }}
+          TEST_EMAILS: ${{ vars.TEST_EMAILS }}
+          MIN_BUYERS: "20"
+        run: python daily_picks.py
