@@ -11,11 +11,11 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "dry-run (write nothing), test (TEST_EMAILS only) or live (everyone)"
+        description: "dry-run (write nothing), test (TEST_EMAILS only), live (everyone), subjects (rewrite subject lines only)"
         required: true
         default: dry-run
         type: choice
-        options: [dry-run, test, live]
+        options: [dry-run, test, live, subjects-dry-run, subjects]
       test_as:
         description: "Test mode only: email of the buyer whose picks you want to receive (blank = most active buyer)"
         required: false

@@ -11,6 +11,8 @@ Modes (env MODE):
   dry-run  – fetch + build everything, write nothing (default)
   test     – write only to contacts listed in TEST_EMAILS; template IS updated
   live     – write to everyone
+  subjects – only rewrite mp_rec_subject from the picks already on contacts (no new picks)
+  subjects-dry-run – show the new subjects, write nothing
 
 Env vars: METABASE_URL, METABASE_API_KEY, PICKS_QUESTION_ID (270), ENDING_QUESTION_ID,
           HUBSPOT_TOKEN, TEMPLATE_PATH (motormarket-daily-picks.html), MODE, TEST_EMAILS,
@@ -48,11 +50,12 @@ SPECIAL = {"MERCEDES-BENZ": "Mercedes-Benz", "MERCEDES-AMG": "Mercedes-AMG", "LA
 
 
 def nice_name(vehicle):
-    """'2023 VOLVO XC60' -> 'Volvo XC60'; '2024 TOYOTA COROLLA CROSS' -> 'Toyota Corolla Cross'."""
+    """'2023 VOLVO XC60' -> '2023 Volvo XC60'; '2024 TOYOTA COROLLA CROSS' -> '2024 Toyota Corolla Cross'."""
     words = (vehicle or "").split()
+    year = None
     if words and words[0].isdigit():
-        words = words[1:]
-    out = []
+        year, words = words[0], words[1:]
+    out = [year] if year else []
     for w in words:
         u = w.upper()
         if u in SPECIAL:
@@ -68,7 +71,7 @@ def nice_name(vehicle):
 
 def subject_line(row):
     """Personalised subject from the buyer's picks, e.g.
-    'Volvo XC60, Nissan Navara & more picked for you – bidding closes soon'"""
+    '2023 Volvo XC60, 2022 Nissan Navara & more picked for you – bidding closes soon'"""
     names = [nice_name(row.get(f"mp_rec_{n}_vehicle")) for n in (1, 2, 3)]
     names = [n for n in names if n]
     if not names:
@@ -172,6 +175,30 @@ def choose_picks(row, history):
     return props, new_history
 
 
+def refresh_subjects(mode):
+    """Rewrite mp_rec_subject from the picks already on each contact (picks and history untouched)."""
+    updates, after = [], None
+    while True:
+        body = {"filterGroups": [{"filters": [{"propertyName": "mp_rec_generated_at", "operator": "HAS_PROPERTY"}]}],
+                "properties": ["mp_rec_1_vehicle", "mp_rec_2_vehicle", "mp_rec_3_vehicle", "mp_rec_subject"],
+                "limit": 100}
+        if after:
+            body["after"] = after
+        r = hs("POST", "/crm/v3/objects/contacts/search", json=body).json()
+        for c in r.get("results", []):
+            subject = subject_line(c["properties"])
+            if subject != (c["properties"].get("mp_rec_subject") or ""):
+                updates.append({"id": c["id"], "properties": {"mp_rec_subject": subject}})
+        after = r.get("paging", {}).get("next", {}).get("after")
+        if not after:
+            break
+    log(f"subjects to update: {len(updates)}")
+    print(json.dumps(updates[:3], indent=2, ensure_ascii=False))
+    if mode == "subjects":
+        update_contacts(updates)
+        log("subjects updated – done")
+
+
 def update_contacts(updates):
     for batch in chunks(updates):
         hs("POST", "/crm/v3/objects/contacts/batch/update", json={"inputs": batch})
@@ -192,6 +219,9 @@ def main():
     test_emails = {e.strip().lower() for e in os.environ.get("TEST_EMAILS", "").split(",") if e.strip()}
     min_buyers = int(os.environ.get("MIN_BUYERS", "20"))
     log(f"mode={mode}")
+    if mode in ("subjects", "subjects-dry-run"):
+        refresh_subjects(mode)
+        return
 
     # 1. Picks -> contacts
     rows = run_question(env("PICKS_QUESTION_ID", "270"))
