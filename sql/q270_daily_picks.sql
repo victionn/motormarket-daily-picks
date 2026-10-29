@@ -13,6 +13,7 @@
    All values are display-ready (HubSpot can't run logic on contact data in emails):
      mp_rec_N_feature_1..3 = "✓ Hybrid", "✓ Panoramic roof", ... (empty when the car has fewer)
      mp_rec_N_odometer = "79,360 KM" or "Not listed"
+     mp_rec_N_closes = "Closes Fri 30 Oct, 12pm" (Sydney time)
    Output columns match the HubSpot contact properties; match on Email.
    The last 5 columns are for review only – don't import them. */
 WITH user_bids AS (
@@ -306,6 +307,9 @@ picks AS (
            CASE WHEN r.odometer REGEXP '^[0-9]+$'
                 THEN CONCAT(FORMAT(CAST(r.odometer AS UNSIGNED), 0), ' KM') ELSE 'Not listed' END AS odometer_fmt,
            COALESCE(r.state, 'Not listed') AS state_fmt,
+           CONCAT('Closes ', DATE_FORMAT(CONVERT_TZ(r.ends_at, '+00:00', 'Australia/Sydney'), '%a %e %b'), ', ',
+                  LOWER(DATE_FORMAT(CONVERT_TZ(r.ends_at, '+00:00', 'Australia/Sydney'),
+                        CASE WHEN MINUTE(r.ends_at) = 0 THEN '%l%p' ELSE '%l:%i%p' END))) AS closes_fmt,
            COALESCE(sp.f1, '') AS f1, COALESCE(sp.f2, '') AS f2, COALESCE(sp.f3, '') AS f3
     FROM (
         SELECT m.*, ROW_NUMBER() OVER (PARTITION BY m.user_id
@@ -327,6 +331,7 @@ SELECT
     MAX(CASE WHEN p.rn = 1 THEN p.image_url END)               AS `mp_rec_1_image`,
     MAX(CASE WHEN p.rn = 1 THEN p.odometer_fmt END)            AS `mp_rec_1_odometer`,
     MAX(CASE WHEN p.rn = 1 THEN p.state_fmt END)               AS `mp_rec_1_state`,
+    MAX(CASE WHEN p.rn = 1 THEN p.closes_fmt END)              AS `mp_rec_1_closes`,
     MAX(CASE WHEN p.rn = 1 THEN p.f1 END)                      AS `mp_rec_1_feature_1`,
     MAX(CASE WHEN p.rn = 1 THEN p.f2 END)                      AS `mp_rec_1_feature_2`,
     MAX(CASE WHEN p.rn = 1 THEN p.f3 END)                      AS `mp_rec_1_feature_3`,
@@ -335,6 +340,7 @@ SELECT
     MAX(CASE WHEN p.rn = 2 THEN p.image_url END)               AS `mp_rec_2_image`,
     MAX(CASE WHEN p.rn = 2 THEN p.odometer_fmt END)            AS `mp_rec_2_odometer`,
     MAX(CASE WHEN p.rn = 2 THEN p.state_fmt END)               AS `mp_rec_2_state`,
+    MAX(CASE WHEN p.rn = 2 THEN p.closes_fmt END)              AS `mp_rec_2_closes`,
     MAX(CASE WHEN p.rn = 2 THEN p.f1 END)                      AS `mp_rec_2_feature_1`,
     MAX(CASE WHEN p.rn = 2 THEN p.f2 END)                      AS `mp_rec_2_feature_2`,
     MAX(CASE WHEN p.rn = 2 THEN p.f3 END)                      AS `mp_rec_2_feature_3`,
@@ -343,6 +349,7 @@ SELECT
     MAX(CASE WHEN p.rn = 3 THEN p.image_url END)               AS `mp_rec_3_image`,
     MAX(CASE WHEN p.rn = 3 THEN p.odometer_fmt END)            AS `mp_rec_3_odometer`,
     MAX(CASE WHEN p.rn = 3 THEN p.state_fmt END)               AS `mp_rec_3_state`,
+    MAX(CASE WHEN p.rn = 3 THEN p.closes_fmt END)              AS `mp_rec_3_closes`,
     MAX(CASE WHEN p.rn = 3 THEN p.f1 END)                      AS `mp_rec_3_feature_1`,
     MAX(CASE WHEN p.rn = 3 THEN p.f2 END)                      AS `mp_rec_3_feature_2`,
     MAX(CASE WHEN p.rn = 3 THEN p.f3 END)                      AS `mp_rec_3_feature_3`,
@@ -351,6 +358,7 @@ SELECT
     MAX(CASE WHEN p.rn = 4 THEN p.image_url END)               AS `mp_rec_4_image`,
     MAX(CASE WHEN p.rn = 4 THEN p.odometer_fmt END)            AS `mp_rec_4_odometer`,
     MAX(CASE WHEN p.rn = 4 THEN p.state_fmt END)               AS `mp_rec_4_state`,
+    MAX(CASE WHEN p.rn = 4 THEN p.closes_fmt END)              AS `mp_rec_4_closes`,
     MAX(CASE WHEN p.rn = 4 THEN p.f1 END)                      AS `mp_rec_4_feature_1`,
     MAX(CASE WHEN p.rn = 4 THEN p.f2 END)                      AS `mp_rec_4_feature_2`,
     MAX(CASE WHEN p.rn = 4 THEN p.f3 END)                      AS `mp_rec_4_feature_3`,
@@ -359,6 +367,7 @@ SELECT
     MAX(CASE WHEN p.rn = 5 THEN p.image_url END)               AS `mp_rec_5_image`,
     MAX(CASE WHEN p.rn = 5 THEN p.odometer_fmt END)            AS `mp_rec_5_odometer`,
     MAX(CASE WHEN p.rn = 5 THEN p.state_fmt END)               AS `mp_rec_5_state`,
+    MAX(CASE WHEN p.rn = 5 THEN p.closes_fmt END)              AS `mp_rec_5_closes`,
     MAX(CASE WHEN p.rn = 5 THEN p.f1 END)                      AS `mp_rec_5_feature_1`,
     MAX(CASE WHEN p.rn = 5 THEN p.f2 END)                      AS `mp_rec_5_feature_2`,
     MAX(CASE WHEN p.rn = 5 THEN p.f3 END)                      AS `mp_rec_5_feature_3`,
@@ -367,6 +376,7 @@ SELECT
     MAX(CASE WHEN p.rn = 6 THEN p.image_url END)               AS `mp_rec_6_image`,
     MAX(CASE WHEN p.rn = 6 THEN p.odometer_fmt END)            AS `mp_rec_6_odometer`,
     MAX(CASE WHEN p.rn = 6 THEN p.state_fmt END)               AS `mp_rec_6_state`,
+    MAX(CASE WHEN p.rn = 6 THEN p.closes_fmt END)              AS `mp_rec_6_closes`,
     MAX(CASE WHEN p.rn = 6 THEN p.f1 END)                      AS `mp_rec_6_feature_1`,
     MAX(CASE WHEN p.rn = 6 THEN p.f2 END)                      AS `mp_rec_6_feature_2`,
     MAX(CASE WHEN p.rn = 6 THEN p.f3 END)                      AS `mp_rec_6_feature_3`,
@@ -375,6 +385,7 @@ SELECT
     MAX(CASE WHEN p.rn = 7 THEN p.image_url END)               AS `mp_rec_7_image`,
     MAX(CASE WHEN p.rn = 7 THEN p.odometer_fmt END)            AS `mp_rec_7_odometer`,
     MAX(CASE WHEN p.rn = 7 THEN p.state_fmt END)               AS `mp_rec_7_state`,
+    MAX(CASE WHEN p.rn = 7 THEN p.closes_fmt END)              AS `mp_rec_7_closes`,
     MAX(CASE WHEN p.rn = 7 THEN p.f1 END)                      AS `mp_rec_7_feature_1`,
     MAX(CASE WHEN p.rn = 7 THEN p.f2 END)                      AS `mp_rec_7_feature_2`,
     MAX(CASE WHEN p.rn = 7 THEN p.f3 END)                      AS `mp_rec_7_feature_3`,
@@ -383,6 +394,7 @@ SELECT
     MAX(CASE WHEN p.rn = 8 THEN p.image_url END)               AS `mp_rec_8_image`,
     MAX(CASE WHEN p.rn = 8 THEN p.odometer_fmt END)            AS `mp_rec_8_odometer`,
     MAX(CASE WHEN p.rn = 8 THEN p.state_fmt END)               AS `mp_rec_8_state`,
+    MAX(CASE WHEN p.rn = 8 THEN p.closes_fmt END)              AS `mp_rec_8_closes`,
     MAX(CASE WHEN p.rn = 8 THEN p.f1 END)                      AS `mp_rec_8_feature_1`,
     MAX(CASE WHEN p.rn = 8 THEN p.f2 END)                      AS `mp_rec_8_feature_2`,
     MAX(CASE WHEN p.rn = 8 THEN p.f3 END)                      AS `mp_rec_8_feature_3`,
@@ -391,6 +403,7 @@ SELECT
     MAX(CASE WHEN p.rn = 9 THEN p.image_url END)               AS `mp_rec_9_image`,
     MAX(CASE WHEN p.rn = 9 THEN p.odometer_fmt END)            AS `mp_rec_9_odometer`,
     MAX(CASE WHEN p.rn = 9 THEN p.state_fmt END)               AS `mp_rec_9_state`,
+    MAX(CASE WHEN p.rn = 9 THEN p.closes_fmt END)              AS `mp_rec_9_closes`,
     MAX(CASE WHEN p.rn = 9 THEN p.f1 END)                      AS `mp_rec_9_feature_1`,
     MAX(CASE WHEN p.rn = 9 THEN p.f2 END)                      AS `mp_rec_9_feature_2`,
     MAX(CASE WHEN p.rn = 9 THEN p.f3 END)                      AS `mp_rec_9_feature_3`,

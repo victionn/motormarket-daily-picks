@@ -42,6 +42,8 @@ def _car(c):
     meta = " &nbsp;&nbsp; ".join(x for x in (
         f"&#9201;&nbsp;{html.escape(c['odometer'])} KM" if c.get("odometer") else "",
         f"&#8982;&nbsp;{html.escape(c['state'])}" if c.get("state") else "") if x)
+    closes = (f'<div style="margin:2px 0 0; line-height:20px; color:#001B49; font-size:13px; font-weight:600;">'
+              f'{html.escape(c["closes"])}</div>') if c.get("closes") else ""
     feats = _features(c.get("tags") or [])
     feat_div = f'<div style="margin:6px 0 0; font-size:13px;">{feats}</div>' if feats else ""
     return f'''
@@ -76,7 +78,7 @@ def _day_label(close_date, today=None):
     return close_date.strftime("%A")
 
 
-def build_block(cars, max_cars=10, today=None):
+def build_block(cars, max_cars=10, today=None, countdown=""):
     """cars: list of dicts in rank order. Returns the HTML between the markers ('' hides the section)."""
     cars = cars[:max_cars]
     if not cars:
@@ -89,6 +91,13 @@ def build_block(cars, max_cars=10, today=None):
           <tr>
             <td bgcolor="#ffffff" style="padding:0 20px 8px; font-family:Poppins, Arial, sans-serif; font-size:14px; color:#001B49; line-height:175%;">The most-watched cars closing {day}. Get your bids in before noon.</td>
           </tr>'''
+    if countdown:
+        head += f'''
+          <tr>
+            <td bgcolor="#ffffff" align="center" style="padding:6px 20px 14px; font-size:0; line-height:0;">
+              <img src="{html.escape(countdown)}" width="400" alt="Time left to bid" style="display:block; margin:0 auto; width:400px; max-width:100%; height:auto;">
+            </td>
+          </tr>'''
     return head + "".join(_car(c) for c in cars) + "\n          "
 
 
@@ -97,6 +106,36 @@ def insert_block(template_src, block):
     if not pattern.search(template_src):
         raise ValueError("ENDING_TODAY markers not found in template")
     return pattern.sub(lambda m: START + block + END, template_src, count=1)
+
+
+def _closes_label(value):
+    """'2026-10-30T12:00:00...' (Sydney time) -> 'Closes Fri 30 Oct, 12pm'."""
+    try:
+        t = dt.datetime.fromisoformat(str(value)[:19])
+    except (TypeError, ValueError):
+        return ""
+    hour = t.strftime("%I").lstrip("0") or "12"
+    time = f"{hour}{t.strftime('%p').lower()}" if t.minute == 0 else f"{hour}:{t.minute:02d}{t.strftime('%p').lower()}"
+    return f"Closes {t.strftime('%a')} {t.day} {t.strftime('%b')}, {time}"
+
+
+def _parse_datetime(value):
+    """'2026-10-30T12:00:00...' (Sydney wall time) -> aware datetime in Sydney, or None."""
+    try:
+        return dt.datetime.fromisoformat(str(value)[:19]).replace(tzinfo=ZoneInfo("Australia/Sydney"))
+    except (TypeError, ValueError):
+        return None
+
+
+def countdown_url(template, close_at):
+    """Fill a countdown-image URL template with the closing time.
+    Placeholders: {END_UNIX} (seconds), {END_ISO_UTC} (2026-10-30T01:00:00Z), {END_SYD} (2026-10-30 12:00)."""
+    if not template or not close_at:
+        return ""
+    utc = close_at.astimezone(dt.timezone.utc)
+    return (template.replace("{END_UNIX}", str(int(utc.timestamp())))
+                    .replace("{END_ISO_UTC}", utc.strftime("%Y-%m-%dT%H:%M:%SZ"))
+                    .replace("{END_SYD}", close_at.strftime("%Y-%m-%d %H:%M")))
 
 
 def _parse_date(value):
@@ -121,6 +160,8 @@ def cars_from_metabase(rows):
             "state": r.get("state") or "",
             "tags": [r.get(f"point_{i}") for i in (1, 2, 3) if r.get(f"point_{i}")],
             "close_date": _parse_date(r.get("ends_at_sydney")),
+            "closes": _closes_label(r.get("ends_at_sydney")),
+            "close_at": _parse_datetime(r.get("ends_at_sydney")),
         })
     return cars
 

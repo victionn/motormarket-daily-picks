@@ -65,5 +65,6 @@ jobs:
           TEMPLATE_PATH: ${{ vars.TEMPLATE_PATH || 'motormarket-daily-picks.html' }}
           TEST_EMAILS: ${{ vars.TEST_EMAILS }}
           TEST_AS: ${{ github.event.inputs.test_as }}
+          COUNTDOWN_URL: ${{ vars.COUNTDOWN_URL }}
           MIN_BUYERS: "20"
         run: python daily_picks.py

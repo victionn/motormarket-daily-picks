@@ -24,13 +24,13 @@ import time
 
 import requests
 
-from ending_today_block import build_block, cars_from_metabase, insert_block, insert_close_date
+from ending_today_block import build_block, cars_from_metabase, countdown_url, insert_block, insert_close_date
 
 HUBSPOT = "https://api.hubapi.com"
 
 # Per-pick fields. Question 270 returns each buyer's top 9 (mp_rec_1..9_*); the script writes the
 # best 3 the buyer hasn't been shown recently into HubSpot slots mp_rec_1..3_* (review columns never).
-FIELDS = ("vehicle", "link", "image", "odometer", "state", "feature_1", "feature_2", "feature_3")
+FIELDS = ("vehicle", "link", "image", "odometer", "state", "closes", "feature_1", "feature_2", "feature_3")
 CANDIDATES = 9
 HISTORY_SENDS = 3          # don't repeat a car shown in the buyer's last 3 emails
 HISTORY_PROP = "mp_rec_history"
@@ -233,7 +233,8 @@ def main():
     if ending_id:
         ending = cars_from_metabase(run_question(ending_id))
         log(f"ending today: {len(ending)} cars")
-        new_tpl = insert_block(get_template(tpl_path), build_block(ending))
+        timer = countdown_url(os.environ.get("COUNTDOWN_URL", ""), ending[0].get("close_at") if ending else None)
+        new_tpl = insert_block(get_template(tpl_path), build_block(ending, countdown=timer))
         if ending:
             new_tpl = insert_close_date(new_tpl, ending[0].get("close_date"))
     else:
