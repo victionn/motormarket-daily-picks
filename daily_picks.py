@@ -117,8 +117,14 @@ def main():
 
     by_email = {(r.get("Email") or "").strip().lower(): r for r in rows if r.get("Email")}
     if mode == "test":
-        # test contacts get the picks of the top buyer, so the email has real data
-        sample = rows[0] if rows else None
+        # Test contacts get one real buyer's picks, so you see exactly what that buyer would get.
+        # TEST_AS picks the buyer (their email); otherwise the most active buyer.
+        test_as = os.environ.get("TEST_AS", "").strip().lower()
+        sample = by_email.get(test_as) if test_as else (rows[0] if rows else None)
+        if test_as and sample is None:
+            sys.exit(f"TEST_AS {test_as} is not in today's picks (not an active bidder?)")
+        log(f"test mode: writing the picks of {sample.get('Email') if sample else 'nobody'} "
+            f"to {', '.join(sorted(test_emails))}")
         by_email = {e: sample for e in test_emails} if sample else {}
 
     ids = contact_ids_by_email(list(by_email))

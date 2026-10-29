@@ -16,6 +16,10 @@ on:
         default: dry-run
         type: choice
         options: [dry-run, test, live]
+      test_as:
+        description: "Test mode only: email of the buyer whose picks you want to receive (blank = most active buyer)"
+        required: false
+        default: ""
 
 jobs:
   picks:
@@ -60,5 +64,6 @@ jobs:
           ENDING_QUESTION_ID: ${{ vars.ENDING_QUESTION_ID }}
           TEMPLATE_PATH: ${{ vars.TEMPLATE_PATH || 'motormarket-daily-picks.html' }}
           TEST_EMAILS: ${{ vars.TEST_EMAILS }}
+          TEST_AS: ${{ github.event.inputs.test_as }}
           MIN_BUYERS: "20"
         run: python daily_picks.py
