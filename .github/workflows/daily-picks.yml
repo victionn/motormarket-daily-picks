@@ -37,8 +37,14 @@ jobs:
           # Sydney is UTC+11 in daylight saving and UTC+10 otherwise.
           # Pick the schedule that matches today's offset; this still works if GitHub starts the run late.
           if [ "$(TZ=Australia/Sydney date +%z)" = "+1100" ]; then want="45 23 * * 1,3,6"; else want="45 0 * * 0,2,4"; fi
+          now=$((10#$(TZ=Australia/Sydney date +%H%M)))
           if [ "${{ github.event_name }}" = "schedule" ] && [ "${{ github.event.schedule }}" != "$want" ]; then
             echo "This schedule is for the other half of the year - skipping"
+            echo "go=false" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "schedule" ] && [ $now -ge 1145 ]; then
+            # Too close to the 12:05pm send: HubSpot's "delay until 12:05" would hold these contacts
+            # until tomorrow and send stale picks. Skip today instead.
+            echo "GitHub started this run late ($now Sydney) - skipping"
             echo "go=false" >> "$GITHUB_OUTPUT"
           else
             echo "go=true" >> "$GITHUB_OUTPUT"
