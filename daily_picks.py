@@ -1,6 +1,6 @@
 """MotorMarket Daily Picks – daily job.
 
-Every weekday morning (before the 7:30am send):
+9:05am Sydney on Sun/Tue/Wed (before the 12:05pm send):
   1. Runs Metabase question 270 (picks per buyer) and writes the values onto each buyer's
      HubSpot contact (only contacts that already exist; matched on email).
   2. Runs the "ending today" Metabase question and rebuilds the "Ending today at 12pm" block
