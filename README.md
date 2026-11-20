@@ -30,4 +30,8 @@ Variables:
   (e.g. `motormarket-ending-soon-all-bidders.html=ending_soon` for the all-bidders email)
 
 ## Run by hand
+- One-off manual send to inactive bidders: create a static contact list in HubSpot, run with mode
+  `inactive-list` (try `inactive-list-dry-run` first) and its `list_id`, then send the email to that list.
+  Add the closing day's run date to `INACTIVE_SKIP_DATES` so the automatic general email doesn't repeat it.
+
 Actions → Daily picks → Run workflow → pick a mode.
