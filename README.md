@@ -23,6 +23,8 @@ Variables:
 - `TEST_EMAILS` – comma-separated emails that get written in test mode
 - `ENDING_QUESTION_ID` – Metabase question number for ending-today (leave unset to skip the template update)
 - `TEMPLATE_PATH` – Design Manager path of the email template (default `motormarket-daily-picks.html`)
+- `EXTRA_TEMPLATE_PATHS` – more templates that get the same "ending" list, comma-separated, each `path` or `path=utm_campaign`
+  (e.g. `motormarket-ending-soon-all-bidders.html=ending_soon` for the all-bidders email)
 
 ## Run by hand
 Actions → Daily picks → Run workflow → pick a mode.

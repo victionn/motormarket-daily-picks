@@ -16,7 +16,8 @@ from zoneinfo import ZoneInfo
 
 START = "<!-- ENDING_TODAY_START -->"
 END = "<!-- ENDING_TODAY_END -->"
-UTM = "?utm_source=hubspot&utm_medium=email&utm_campaign=daily_picks&utm_content=ending_today"
+def _utm(campaign):
+    return f"?utm_source=hubspot&utm_medium=email&utm_campaign={campaign}&utm_content=ending_today"
 
 
 def _features(tags):
@@ -26,9 +27,9 @@ def _features(tags):
         for t in tags[:3])
 
 
-def _car(c):
+def _car(c, campaign="daily_picks"):
     """c: dict with contract_id, name, image, odometer, state, tags (list)."""
-    link = html.escape(f"https://app.motorplatform.com.au/motor-market/buying/{c['contract_id']}/summary{UTM}")
+    link = html.escape(f"https://app.motorplatform.com.au/motor-market/buying/{c['contract_id']}/summary{_utm(campaign)}")
     name = html.escape(c["name"])
     img = ""
     if c.get("image"):
@@ -78,8 +79,9 @@ def _day_label(close_date, today=None):
     return close_date.strftime("%A")
 
 
-def build_block(cars, max_cars=10, today=None, countdown=""):
-    """cars: list of dicts in rank order. Returns the HTML between the markers ('' hides the section)."""
+def build_block(cars, max_cars=10, today=None, countdown="", campaign="daily_picks"):
+    """cars: list of dicts in rank order. Returns the HTML between the markers ('' hides the section).
+    campaign: utm_campaign on the car links (each email template can use its own)."""
     cars = cars[:max_cars]
     if not cars:
         return ""
@@ -98,7 +100,7 @@ def build_block(cars, max_cars=10, today=None, countdown=""):
               <img src="{html.escape(countdown)}" width="400" alt="Time left to bid" style="display:block; margin:0 auto; width:400px; max-width:100%; height:auto;">
             </td>
           </tr>'''
-    return head + "".join(_car(c) for c in cars) + "\n          "
+    return head + "".join(_car(c, campaign) for c in cars) + "\n          "
 
 
 def insert_block(template_src, block):

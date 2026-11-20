@@ -16,7 +16,9 @@ Modes (env MODE):
 
 Env vars: METABASE_URL, METABASE_API_KEY, PICKS_QUESTION_ID (270), ENDING_QUESTION_ID,
           HUBSPOT_TOKEN, TEMPLATE_PATH (motormarket-daily-picks.html), MODE, TEST_EMAILS,
-          MIN_BUYERS (abort below this, default 20)
+          MIN_BUYERS (abort below this, default 20),
+          EXTRA_TEMPLATE_PATHS – more templates that get the same "ending" list, comma-separated,
+            each as path or path=utm_campaign (e.g. motormarket-ending-soon-all-bidders.html=ending_soon)
 """
 import json
 import os
@@ -213,6 +215,16 @@ def put_template(path, source):
        files={"file": (os.path.basename(path), source.encode("utf-8"), "text/html")})
 
 
+def extra_templates():
+    """EXTRA_TEMPLATE_PATHS -> [(path, utm_campaign)]. 'a.html=ending_soon, b.html' (campaign defaults to daily_picks)."""
+    out = []
+    for item in os.environ.get("EXTRA_TEMPLATE_PATHS", "").split(","):
+        path, _, campaign = item.strip().partition("=")
+        if path.strip():
+            out.append((path.strip(), campaign.strip() or "daily_picks"))
+    return out
+
+
 # ---------------------------------------------------------------- main
 def main():
     mode = os.environ.get("MODE", "dry-run")
@@ -262,16 +274,19 @@ def main():
 
     # 2. Ending today -> template (skipped when ENDING_QUESTION_ID is not set)
     ending_id = os.environ.get("ENDING_QUESTION_ID")
-    new_tpl = None
+    new_tpls = {}  # template path -> new source
     tpl_path = env("TEMPLATE_PATH", "motormarket-daily-picks.html")
     if ending_id:
         ending = cars_from_metabase(run_question(ending_id))
         log(f"ending today: {len(ending)} cars")
         # one shared countdown for the Ending list (all its cars close at the same time)
         timer = countdown_url(os.environ.get("ENDING_COUNTDOWN_URL", ""), ending[0].get("close_at") if ending else None)
-        new_tpl = insert_block(get_template(tpl_path), build_block(ending, countdown=timer))
-        if ending:
-            new_tpl = insert_close_date(new_tpl, ending[0].get("close_date"))
+        for path, campaign in [(tpl_path, "daily_picks")] + extra_templates():
+            src = insert_block(get_template(path), build_block(ending, countdown=timer, campaign=campaign))
+            if ending:
+                src = insert_close_date(src, ending[0].get("close_date"))
+            new_tpls[path] = src
+        log("templates to update: " + ", ".join(new_tpls))
     else:
         log("ENDING_QUESTION_ID not set: template left as is")
 
@@ -279,9 +294,9 @@ def main():
         log("dry-run: nothing written")
         print(json.dumps(updates[:2], indent=2, ensure_ascii=False))
         return
-    if new_tpl is not None:
-        put_template(tpl_path, new_tpl)
-        log("template updated")
+    for path, src in new_tpls.items():
+        put_template(path, src)
+        log(f"template updated: {path}")
     update_contacts(updates)
     log(f"updated {len(updates)} contacts – done")
 
