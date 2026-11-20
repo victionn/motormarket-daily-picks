@@ -5,6 +5,9 @@
      HubSpot contact (only contacts that already exist; matched on email).
   2. Runs the "ending today" Metabase question and rebuilds the "Ending today at 12pm" block
      inside the HubSpot email template (same list for everyone).
+  3. (when ALL_BIDDERS_QUESTION_ID is set) Runs the "everyone with bidding permission" question and stamps
+     mp_ending_soon_generated_at on every permitted bidder who is NOT getting Daily Picks in this run, so a
+     second workflow sends them the general "Ending soon" email. Nobody gets both.
 The HubSpot workflow then sends the email to contacts whose mp_rec_generated_at is from today.
 
 Modes (env MODE):
@@ -17,6 +20,8 @@ Modes (env MODE):
 Env vars: METABASE_URL, METABASE_API_KEY, PICKS_QUESTION_ID (270), ENDING_QUESTION_ID,
           HUBSPOT_TOKEN, TEMPLATE_PATH (motormarket-daily-picks.html), MODE, TEST_EMAILS,
           MIN_BUYERS (abort below this, default 20),
+          ALL_BIDDERS_QUESTION_ID – Metabase question of everyone allowed to bid (column: email); unset = skip step 3,
+          MIN_INACTIVE (skip step 3 below this, default 50),
           EXTRA_TEMPLATE_PATHS – more templates that get the same "ending" list, comma-separated,
             each as path or path=utm_campaign (e.g. motormarket-ending-soon-all-bidders.html=ending_soon)
 """
@@ -215,6 +220,35 @@ def put_template(path, source):
        files={"file": (os.path.basename(path), source.encode("utf-8"), "text/html")})
 
 
+ENDING_SOON_PROP = "mp_ending_soon_generated_at"
+
+
+def inactive_bidder_updates(daily_picks_emails, mode, test_emails):
+    """Contacts to stamp with ENDING_SOON_PROP: allowed to bid, but not getting Daily Picks this run.
+    Test mode stamps only TEST_EMAILS. Returns [] when ALL_BIDDERS_QUESTION_ID is not set."""
+    qid = os.environ.get("ALL_BIDDERS_QUESTION_ID")
+    if not qid:
+        log("ALL_BIDDERS_QUESTION_ID not set: general Ending soon email skipped")
+        return []
+    permitted = {(r.get("email") or "").strip().lower() for r in run_question(qid) if r.get("email")}
+    inactive = sorted(permitted - daily_picks_emails)
+    log(f"allowed to bid: {len(permitted)}; getting Daily Picks: {len(permitted & daily_picks_emails)}; "
+        f"general email: {len(inactive)}")
+    min_inactive = int(os.environ.get("MIN_INACTIVE", "50"))
+    if mode == "live" and len(inactive) < min_inactive:
+        log(f"Only {len(inactive)} bidders for the general email (< {min_inactive}): skipped, Daily Picks still goes")
+        return []
+    if mode == "test":
+        inactive = sorted(test_emails)
+        log(f"test mode: stamping {', '.join(inactive)} only")
+    contacts = contacts_by_email(inactive)
+    missing = [e for e in inactive if e not in contacts]
+    if missing:
+        log(f"general email: {len(missing)} not in HubSpot (skipped), e.g. " + ", ".join(missing[:10]))
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    return [{"id": contacts[e][0], "properties": {ENDING_SOON_PROP: stamp}} for e in inactive if e in contacts]
+
+
 def extra_templates():
     """EXTRA_TEMPLATE_PATHS -> [(path, utm_campaign)]. 'a.html=ending_soon, b.html' (campaign defaults to daily_picks)."""
     out = []
@@ -242,6 +276,7 @@ def main():
         sys.exit(f"Only {len(rows)} buyers (< {min_buyers}); aborting so nobody gets a thin email")
 
     by_email = {(r.get("Email") or "").strip().lower(): r for r in rows if r.get("Email")}
+    daily_picks_emails = set(by_email)  # everyone getting Daily Picks this run (before test filtering)
     if mode == "test":
         # Test contacts get one real buyer's picks, so you see exactly what that buyer would get.
         # TEST_AS picks the buyer (their email); otherwise the most active buyer.
@@ -290,6 +325,9 @@ def main():
     else:
         log("ENDING_QUESTION_ID not set: template left as is")
 
+    # 3. Permitted bidders without Daily Picks -> general "Ending soon" email
+    inactive_updates = inactive_bidder_updates(daily_picks_emails, mode, test_emails)
+
     if mode == "dry-run":
         log("dry-run: nothing written")
         print(json.dumps(updates[:2], indent=2, ensure_ascii=False))
@@ -298,7 +336,9 @@ def main():
         put_template(path, src)
         log(f"template updated: {path}")
     update_contacts(updates)
-    log(f"updated {len(updates)} contacts – done")
+    log(f"updated {len(updates)} contacts")
+    update_contacts(inactive_updates)
+    log(f"stamped {len(inactive_updates)} contacts for the general Ending soon email – done")
 
 
 if __name__ == "__main__":
