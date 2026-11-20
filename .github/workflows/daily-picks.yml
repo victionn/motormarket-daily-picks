@@ -48,6 +48,7 @@ jobs:
           ENDING_QUESTION_ID: ${{ vars.ENDING_QUESTION_ID }}
           TEMPLATE_PATH: ${{ vars.TEMPLATE_PATH || 'motormarket-daily-picks.html' }}
           EXTRA_TEMPLATE_PATHS: ${{ vars.EXTRA_TEMPLATE_PATHS }}
+          ALL_BIDDERS_QUESTION_ID: ${{ vars.ALL_BIDDERS_QUESTION_ID }}
           TEST_EMAILS: ${{ vars.TEST_EMAILS }}
           TEST_AS: ${{ github.event.inputs.test_as }}
           COUNTDOWN_URL: ${{ vars.COUNTDOWN_URL }}
