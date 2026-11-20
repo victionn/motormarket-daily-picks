@@ -30,4 +30,8 @@ Variables:
   (e.g. `motormarket-ending-soon-all-bidders.html=ending_soon` for the all-bidders email)
 
 ## Run by hand
+- One-off manual send to inactive bidders: run with mode `inactive-list` (try `inactive-list-dry-run` first).
+  It tags them `mp_manual_send_tag=<date>`; send the email by hand to a segment filtered on that tag.
+  Add the closing day's run date to `INACTIVE_SKIP_DATES` so the automatic general email doesn't repeat it.
+
 Actions → Daily picks → Run workflow → pick a mode.
