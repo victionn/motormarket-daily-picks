@@ -12,8 +12,8 @@ on:
         default: dry-run
         type: choice
         options: [dry-run, test, live, subjects-dry-run, subjects, inactive-list-dry-run, inactive-list]
-      list_id:
-        description: "inactive-list modes only: HubSpot static list ID to fill"
+      tag:
+        description: "inactive-list modes only: value for mp_manual_send_tag (blank = today's date)"
         required: false
         default: ""
       test_as:
@@ -53,7 +53,7 @@ jobs:
           TEMPLATE_PATH: ${{ vars.TEMPLATE_PATH || 'motormarket-daily-picks.html' }}
           EXTRA_TEMPLATE_PATHS: ${{ vars.EXTRA_TEMPLATE_PATHS }}
           ALL_BIDDERS_QUESTION_ID: ${{ vars.ALL_BIDDERS_QUESTION_ID }}
-          INACTIVE_LIST_ID: ${{ github.event.inputs.list_id }}
+          INACTIVE_TAG: ${{ github.event.inputs.tag }}
           INACTIVE_SKIP_DATES: ${{ vars.INACTIVE_SKIP_DATES }}
           TEST_EMAILS: ${{ vars.TEST_EMAILS }}
           TEST_AS: ${{ github.event.inputs.test_as }}

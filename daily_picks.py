@@ -16,7 +16,7 @@ Modes (env MODE):
   live     – write to everyone
   subjects – only rewrite mp_rec_subject from the picks already on contacts (no new picks)
   subjects-dry-run – show the new subjects, write nothing
-  inactive-list – one-off manual send: add permitted non-Daily-Picks bidders to static list INACTIVE_LIST_ID
+  inactive-list – one-off manual send: tag permitted non-Daily-Picks bidders with mp_manual_send_tag=<date>
                   and refresh the extra templates (no picks, no stamps, no workflow fires)
   inactive-list-dry-run – same, write nothing
 
@@ -248,11 +248,15 @@ def ending_templates(paths=None):
     return new_tpls
 
 
+MANUAL_TAG_PROP = "mp_manual_send_tag"
+
+
 def inactive_list(mode):
-    """One-off manual send: put today's permitted bidders who are NOT Daily Picks buyers into the static
-    HubSpot list INACTIVE_LIST_ID and refresh the extra (all-bidders) templates. Writes no picks and no
-    stamps, so no workflow fires; the email is then sent by hand to that list."""
-    list_id = env("INACTIVE_LIST_ID")
+    """One-off manual send: tag today's permitted bidders who are NOT Daily Picks buyers with
+    mp_manual_send_tag = INACTIVE_TAG (default: today's Sydney date) and refresh the extra (all-bidders)
+    templates. Writes no picks and no stamps, so no workflow fires; a HubSpot segment on the tag is then
+    sent the email by hand. (The service key can write contacts but not lists, hence a tag.)"""
+    tag = os.environ.get("INACTIVE_TAG") or dt.datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
     daily = {(r.get("Email") or "").strip().lower() for r in run_question(env("PICKS_QUESTION_ID", "270"))
              if r.get("Email")}
     permitted = {(r.get("email") or "").strip().lower() for r in run_question(env("ALL_BIDDERS_QUESTION_ID"))
@@ -268,14 +272,13 @@ def inactive_list(mode):
     ids = [contacts[e][0] for e in inactive if e in contacts]
     new_tpls = ending_templates(extra_templates())
     if mode == "inactive-list-dry-run":
-        log(f"dry-run: would add {len(ids)} contacts to list {list_id}; nothing written")
+        log(f"dry-run: would tag {len(ids)} contacts with {MANUAL_TAG_PROP}={tag}; nothing written")
         return
     for path, src in new_tpls.items():
         put_template(path, src)
         log(f"template updated: {path}")
-    for batch in chunks(ids, 250):
-        hs("PUT", f"/crm/v3/lists/{list_id}/memberships/add", json=batch)
-    log(f"added {len(ids)} contacts to list {list_id} – done")
+    update_contacts([{"id": i, "properties": {MANUAL_TAG_PROP: tag}} for i in ids])
+    log(f"tagged {len(ids)} contacts with {MANUAL_TAG_PROP}={tag} – done")
 
 
 def skip_inactive_today():
