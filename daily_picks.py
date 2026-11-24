@@ -7,7 +7,8 @@
      inside the HubSpot email template (same list for everyone).
   3. (when ALL_BIDDERS_QUESTION_ID is set) Runs the "everyone with bidding permission" question and stamps
      mp_ending_soon_generated_at on every permitted bidder who is NOT getting Daily Picks in this run, so a
-     second workflow sends them the general "Ending soon" email. Nobody gets both.
+     second workflow sends them the general "Ending soon" email. Nobody gets both, except the team
+     emails in ALWAYS_ENDING_SOON, who get the Ending soon email every live run as well.
 The HubSpot workflow then sends the email to contacts whose mp_rec_generated_at is from today.
 
 Modes (env MODE):
@@ -221,6 +222,9 @@ def put_template(path, source):
 
 
 ENDING_SOON_PROP = "mp_ending_soon_generated_at"
+# Team members who get the Ending soon email on every live run, even when they also get Daily Picks.
+# The only exception to "nobody gets both". Not counted towards MIN_INACTIVE.
+ALWAYS_ENDING_SOON = {"andrew.n@motorplatform.com.au"}
 
 
 def inactive_bidder_updates(daily_picks_emails, mode, test_emails):
@@ -241,6 +245,11 @@ def inactive_bidder_updates(daily_picks_emails, mode, test_emails):
     if mode == "test":
         inactive = sorted(test_emails)
         log(f"test mode: stamping {', '.join(inactive)} only")
+    elif mode == "live":
+        extra = ALWAYS_ENDING_SOON - set(inactive)
+        if extra:
+            log(f"always get Ending soon as well: {', '.join(sorted(extra))}")
+        inactive = sorted(set(inactive) | ALWAYS_ENDING_SOON)
     contacts = contacts_by_email(inactive)
     missing = [e for e in inactive if e not in contacts]
     if missing:
