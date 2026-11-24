@@ -224,7 +224,7 @@ def put_template(path, source):
 ENDING_SOON_PROP = "mp_ending_soon_generated_at"
 # Team members who get the Ending soon email on every live run, even when they also get Daily Picks.
 # The only exception to "nobody gets both". Not counted towards MIN_INACTIVE.
-ALWAYS_ENDING_SOON = {"andrew.n@motorplatform.com.au"}
+ALWAYS_ENDING_SOON = {"andrew.n@motorplatform.com.au", "walid@motorplatform.com.au"}
 
 
 def inactive_bidder_updates(daily_picks_emails, mode, test_emails):
