@@ -17,6 +17,9 @@ Modes (env MODE):
   live     – write to everyone
   subjects – only rewrite mp_rec_subject from the picks already on contacts (no new picks)
   subjects-dry-run – show the new subjects, write nothing
+  inactive-list – one-off manual send: tag permitted non-Daily-Picks bidders with mp_manual_send_tag=<date>
+                  and refresh the extra templates (no picks, no stamps, no workflow fires)
+  inactive-list-dry-run – same, write nothing
 
 Env vars: METABASE_URL, METABASE_API_KEY, PICKS_QUESTION_ID (270), ENDING_QUESTION_ID,
           HUBSPOT_TOKEN, TEMPLATE_PATH (motormarket-daily-picks.html), MODE, TEST_EMAILS,
@@ -26,6 +29,7 @@ Env vars: METABASE_URL, METABASE_API_KEY, PICKS_QUESTION_ID (270), ENDING_QUESTI
           EXTRA_TEMPLATE_PATHS – more templates that get the same "ending" list, comma-separated,
             each as path or path=utm_campaign (e.g. motormarket-ending-soon-all-bidders.html=ending_soon)
 """
+import datetime as dt
 import json
 import os
 import re
@@ -33,6 +37,7 @@ import sys
 import time
 
 import requests
+from zoneinfo import ZoneInfo
 
 from ending_today_block import build_block, cars_from_metabase, countdown_url, insert_block, insert_close_date
 
@@ -221,6 +226,68 @@ def put_template(path, source):
        files={"file": (os.path.basename(path), source.encode("utf-8"), "text/html")})
 
 
+def ending_templates(paths=None):
+    """Rebuild the "Ending ... at 12pm" block. Returns {template path: new source} ({} when
+    ENDING_QUESTION_ID is not set). paths: [(path, utm_campaign)]; default = TEMPLATE_PATH + extras."""
+    ending_id = os.environ.get("ENDING_QUESTION_ID")
+    if not ending_id:
+        log("ENDING_QUESTION_ID not set: template left as is")
+        return {}
+    if paths is None:
+        paths = [(env("TEMPLATE_PATH", "motormarket-daily-picks.html"), "daily_picks")] + extra_templates()
+    ending = cars_from_metabase(run_question(ending_id))
+    log(f"ending today: {len(ending)} cars")
+    # one shared countdown for the Ending list (all its cars close at the same time)
+    timer = countdown_url(os.environ.get("ENDING_COUNTDOWN_URL", ""), ending[0].get("close_at") if ending else None)
+    new_tpls = {}
+    for path, campaign in paths:
+        src = insert_block(get_template(path), build_block(ending, countdown=timer, campaign=campaign))
+        if ending:
+            src = insert_close_date(src, ending[0].get("close_date"))
+        new_tpls[path] = src
+    log("templates to update: " + ", ".join(new_tpls))
+    return new_tpls
+
+
+MANUAL_TAG_PROP = "mp_manual_send_tag"
+
+
+def inactive_list(mode):
+    """One-off manual send: tag today's permitted bidders who are NOT Daily Picks buyers with
+    mp_manual_send_tag = INACTIVE_TAG (default: today's Sydney date) and refresh the extra (all-bidders)
+    templates. Writes no picks and no stamps, so no workflow fires; a HubSpot segment on the tag is then
+    sent the email by hand. (The service key can write contacts but not lists, hence a tag.)"""
+    tag = os.environ.get("INACTIVE_TAG") or dt.datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
+    daily = {(r.get("Email") or "").strip().lower() for r in run_question(env("PICKS_QUESTION_ID", "270"))
+             if r.get("Email")}
+    permitted = {(r.get("email") or "").strip().lower() for r in run_question(env("ALL_BIDDERS_QUESTION_ID"))
+                 if r.get("email")}
+    inactive = sorted(permitted - daily)
+    log(f"allowed to bid: {len(permitted)}; Daily Picks buyers: {len(permitted & daily)}; for the list: {len(inactive)}")
+    if len(daily) < int(os.environ.get("MIN_BUYERS", "20")):
+        sys.exit(f"Only {len(daily)} Daily Picks buyers; aborting so active bidders aren't put on the list")
+    contacts = contacts_by_email(inactive)
+    missing = [e for e in inactive if e not in contacts]
+    if missing:
+        log(f"{len(missing)} not in HubSpot (skipped), e.g. " + ", ".join(missing[:10]))
+    ids = [contacts[e][0] for e in inactive if e in contacts]
+    new_tpls = ending_templates(extra_templates())
+    if mode == "inactive-list-dry-run":
+        log(f"dry-run: would tag {len(ids)} contacts with {MANUAL_TAG_PROP}={tag}; nothing written")
+        return
+    for path, src in new_tpls.items():
+        put_template(path, src)
+        log(f"template updated: {path}")
+    update_contacts([{"id": i, "properties": {MANUAL_TAG_PROP: tag}} for i in ids])
+    log(f"tagged {len(ids)} contacts with {MANUAL_TAG_PROP}={tag} – done")
+
+
+def skip_inactive_today():
+    """True when today (Sydney) is in INACTIVE_SKIP_DATES (comma-separated YYYY-MM-DD)."""
+    today = dt.datetime.now(ZoneInfo("Australia/Sydney")).date().isoformat()
+    return today in {d.strip() for d in os.environ.get("INACTIVE_SKIP_DATES", "").split(",")}
+
+
 ENDING_SOON_PROP = "mp_ending_soon_generated_at"
 # Team members who get the Ending soon email on every live run, even when they also get Daily Picks.
 # The only exception to "nobody gets both". Not counted towards MIN_INACTIVE.
@@ -233,6 +300,9 @@ def inactive_bidder_updates(daily_picks_emails, mode, test_emails):
     qid = os.environ.get("ALL_BIDDERS_QUESTION_ID")
     if not qid:
         log("ALL_BIDDERS_QUESTION_ID not set: general Ending soon email skipped")
+        return []
+    if skip_inactive_today():
+        log("today is in INACTIVE_SKIP_DATES: general Ending soon email skipped (Daily Picks still goes)")
         return []
     permitted = {(r.get("email") or "").strip().lower() for r in run_question(qid) if r.get("email")}
     inactive = sorted(permitted - daily_picks_emails)
@@ -277,6 +347,9 @@ def main():
     if mode in ("subjects", "subjects-dry-run"):
         refresh_subjects(mode)
         return
+    if mode in ("inactive-list", "inactive-list-dry-run"):
+        inactive_list(mode)
+        return
 
     # 1. Picks -> contacts
     rows = run_question(env("PICKS_QUESTION_ID", "270"))
@@ -317,22 +390,7 @@ def main():
         log("not in HubSpot (skipped): " + ", ".join(sorted(missing)[:20]) + (" …" if len(missing) > 20 else ""))
 
     # 2. Ending today -> template (skipped when ENDING_QUESTION_ID is not set)
-    ending_id = os.environ.get("ENDING_QUESTION_ID")
-    new_tpls = {}  # template path -> new source
-    tpl_path = env("TEMPLATE_PATH", "motormarket-daily-picks.html")
-    if ending_id:
-        ending = cars_from_metabase(run_question(ending_id))
-        log(f"ending today: {len(ending)} cars")
-        # one shared countdown for the Ending list (all its cars close at the same time)
-        timer = countdown_url(os.environ.get("ENDING_COUNTDOWN_URL", ""), ending[0].get("close_at") if ending else None)
-        for path, campaign in [(tpl_path, "daily_picks")] + extra_templates():
-            src = insert_block(get_template(path), build_block(ending, countdown=timer, campaign=campaign))
-            if ending:
-                src = insert_close_date(src, ending[0].get("close_date"))
-            new_tpls[path] = src
-        log("templates to update: " + ", ".join(new_tpls))
-    else:
-        log("ENDING_QUESTION_ID not set: template left as is")
+    new_tpls = ending_templates()
 
     # 3. Permitted bidders without Daily Picks -> general "Ending soon" email
     inactive_updates = inactive_bidder_updates(daily_picks_emails, mode, test_emails)
