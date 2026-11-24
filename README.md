@@ -26,6 +26,8 @@ Variables:
 - `ALL_BIDDERS_QUESTION_ID` – Metabase question of everyone allowed to bid (596). Each run stamps
   `mp_ending_soon_generated_at` on those who are not getting Daily Picks; the "Ending soon - send" workflow
   sends them the general email. Unset = skipped.
+  Exception: emails in `ALWAYS_ENDING_SOON` (top of `daily_picks.py`, currently andrew.n@motorplatform.com.au)
+  are stamped on every live run, so they get both emails.
 - `EXTRA_TEMPLATE_PATHS` – more templates that get the same "ending" list, comma-separated, each `path` or `path=utm_campaign`
   (e.g. `motormarket-ending-soon-all-bidders.html=ending_soon` for the all-bidders email)
 
