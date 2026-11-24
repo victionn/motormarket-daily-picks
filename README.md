@@ -28,6 +28,8 @@ Variables:
   sends them the general email. Unset = skipped.
   Exception: emails in `ALWAYS_ENDING_SOON` (top of `daily_picks.py`, currently andrew.n@ and walid@motorplatform.com.au)
   are stamped on every live run, so they get both emails.
+  Each stamp also writes `mp_ending_soon_subject` (top 3 cars on the ending list, e.g. "2023 Nissan Qashqai,
+  2018 Mitsubishi Triton & 2023 Kia EV9 – bidding closes tomorrow on MotorMarket"), used as the email's subject.
 - `EXTRA_TEMPLATE_PATHS` – more templates that get the same "ending" list, comma-separated, each `path` or `path=utm_campaign`
   (e.g. `motormarket-ending-soon-all-bidders.html=ending_soon` for the all-bidders email)
 
