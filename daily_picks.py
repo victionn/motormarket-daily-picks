@@ -89,6 +89,19 @@ def subject_line(row):
     return f"{names[0]}, {names[1]} & more picked for you – bidding closes soon"
 
 
+def ending_subject(cars):
+    """Subject for the general Ending soon email from the top 3 cars on the ending list, e.g.
+    '2023 Nissan Qashqai, 2018 Mitsubishi Triton & 2023 Kia EV9 – bidding closes tomorrow on MotorMarket'"""
+    names = [nice_name(c.get("name")) for c in (cars or [])[:3]]
+    names = [n for n in names if n]
+    tail = "bidding closes tomorrow on MotorMarket"
+    if not names:
+        return "Bidding closes tomorrow on MotorMarket"
+    if len(names) == 1:
+        return f"{names[0]} – {tail}"
+    return f"{', '.join(names[:-1])} & {names[-1]} – {tail}"
+
+
 def env(name, default=None, required=True):
     v = os.environ.get(name, default)
     if required and not v:
@@ -222,12 +235,13 @@ def put_template(path, source):
 
 
 ENDING_SOON_PROP = "mp_ending_soon_generated_at"
+ENDING_SOON_SUBJECT_PROP = "mp_ending_soon_subject"  # used as the Ending soon email's subject line
 # Team members who get the Ending soon email on every live run, even when they also get Daily Picks.
 # The only exception to "nobody gets both". Not counted towards MIN_INACTIVE.
 ALWAYS_ENDING_SOON = {"andrew.n@motorplatform.com.au", "walid@motorplatform.com.au"}
 
 
-def inactive_bidder_updates(daily_picks_emails, mode, test_emails):
+def inactive_bidder_updates(daily_picks_emails, mode, test_emails, subject=""):
     """Contacts to stamp with ENDING_SOON_PROP: allowed to bid, but not getting Daily Picks this run.
     Test mode stamps only TEST_EMAILS. Returns [] when ALL_BIDDERS_QUESTION_ID is not set."""
     qid = os.environ.get("ALL_BIDDERS_QUESTION_ID")
@@ -255,7 +269,9 @@ def inactive_bidder_updates(daily_picks_emails, mode, test_emails):
     if missing:
         log(f"general email: {len(missing)} not in HubSpot (skipped), e.g. " + ", ".join(missing[:10]))
     stamp = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    return [{"id": contacts[e][0], "properties": {ENDING_SOON_PROP: stamp}} for e in inactive if e in contacts]
+    log(f"Ending soon subject: {subject}")
+    props = {ENDING_SOON_PROP: stamp, ENDING_SOON_SUBJECT_PROP: subject}
+    return [{"id": contacts[e][0], "properties": dict(props)} for e in inactive if e in contacts]
 
 
 def extra_templates():
@@ -318,6 +334,7 @@ def main():
 
     # 2. Ending today -> template (skipped when ENDING_QUESTION_ID is not set)
     ending_id = os.environ.get("ENDING_QUESTION_ID")
+    ending = []
     new_tpls = {}  # template path -> new source
     tpl_path = env("TEMPLATE_PATH", "motormarket-daily-picks.html")
     if ending_id:
@@ -335,7 +352,8 @@ def main():
         log("ENDING_QUESTION_ID not set: template left as is")
 
     # 3. Permitted bidders without Daily Picks -> general "Ending soon" email
-    inactive_updates = inactive_bidder_updates(daily_picks_emails, mode, test_emails)
+    inactive_updates = inactive_bidder_updates(daily_picks_emails, mode, test_emails,
+                                               subject=ending_subject(ending))
 
     if mode == "dry-run":
         log("dry-run: nothing written")
